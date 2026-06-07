@@ -370,6 +370,19 @@
         };
 
         // --- JARVIS AI ENGINE (Groq) ---
+        async function jarvisFetch(path, options) {
+            try {
+                const response = await fetch(path, options);
+                if (response.ok || (response.status !== 404 && response.status !== 0)) {
+                    return response;
+                }
+            } catch (e) {
+                console.warn(`Relative fetch to ${path} failed, attempting local bridge fallback.`);
+            }
+            const localUrl = `http://localhost:5001${path.startsWith('/') ? '' : '/'}${path}`;
+            return fetch(localUrl, options);
+        }
+
         async function askJarvis(userMessage, conversationHistory = []) {
             let API_KEY = localStorage.getItem('jarvis_groq_key') || '';
             const userProfile = JSON.parse(localStorage.getItem('jarvis_user_profile') || '{}');
@@ -383,7 +396,7 @@
                 // Fetch local system context before asking the brain
                 let systemContext = "";
                 try {
-                    const sysRes = await fetch('/execute', {
+                    const sysRes = await jarvisFetch('/execute', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ command: 'sys_info' })
@@ -397,7 +410,7 @@
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 20000); 
 
-                const response = await fetch('/proxy', {
+                const response = await jarvisFetch('/proxy', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -470,7 +483,7 @@ Execute all requests with dry British wit and peak efficiency.`
                 if (error.name === 'AbortError') {
                     return "Neural bridge timeout, Boss. The connection to the Groq brain took too long. Please try again.";
                 }
-                return `Neural link offline, Boss. I cannot reach the bridge at localhost:5001. Please ensure the 'dev_server.py' is running in the background.`;
+                return `Neural link offline, Boss. I cannot reach the bridge at localhost:5001. Please ensure the 'dev_server.py' is running in the background. If you are using the hosted version (Vercel), you may need to allow mixed content or use the local URL for full system access.`;
             }
         }
 
@@ -491,7 +504,7 @@ Execute all requests with dry British wit and peak efficiency.`
                 if (actionLine.startsWith('ACTION:LOCAL:')) {
                     const localCmd = actionLine.replace('ACTION:LOCAL:', '').trim();
                     try {
-                        await fetch('/execute', {
+                        await jarvisFetch('/execute', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ command: localCmd })
@@ -515,7 +528,7 @@ Execute all requests with dry British wit and peak efficiency.`
                     term.scrollTop = term.scrollHeight;
 
                     try {
-                        const res = await fetch('/search_music', {
+                        const res = await jarvisFetch('/search_music', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ query: query })
@@ -588,7 +601,7 @@ Execute all requests with dry British wit and peak efficiency.`
                     }
 
                     try {
-                        const res = await fetch('/system', {
+                        const res = await jarvisFetch('/system', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(body)
@@ -981,7 +994,7 @@ Execute all requests with dry British wit and peak efficiency.`
             }
 
             try {
-                await fetch('/media', {
+                await jarvisFetch('/media', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ action: action })
@@ -995,7 +1008,7 @@ Execute all requests with dry British wit and peak efficiency.`
             document.getElementById('volume-val').innerText = `${level}%`;
             
             try {
-                await fetch('/media', {
+                await jarvisFetch('/media', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ action: 'set_volume', level: parseInt(level) })
@@ -1011,7 +1024,7 @@ Execute all requests with dry British wit and peak efficiency.`
         // --- Metrics Sync ---
         setInterval(async () => {
             try {
-                const res = await fetch('/execute', {
+                const res = await jarvisFetch('/execute', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ command: 'metrics' })

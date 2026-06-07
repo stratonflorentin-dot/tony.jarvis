@@ -19,7 +19,8 @@ export default {
           deep: 'var(--bg-deep)',
           panel: 'var(--bg-panel)',
           glass: 'var(--bg-glass)',
-        }
+        },
+        'border-hud': 'var(--border-hud)',
       },
       fontFamily: {
         hud: ['var(--font-hud)', 'monospace'],

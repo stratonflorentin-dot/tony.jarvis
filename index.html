@@ -141,10 +141,33 @@
         <!-- Settings Panel -->
         <div id="settings-panel" class="hidden fixed top-20 right-6 z-[1000] w-80 hud-panel p-6 bg-[#000814]/95 border-hud-primary/50 shadow-[0_0_40px_rgba(0,212,255,0.2)]">
             <h2 class="font-hud text-xs tracking-[0.3em] text-hud-primary mb-4">NEURAL LINK CONFIGURATION</h2>
-            <p class="text-[10px] opacity-60 mb-2">GROQ API KEY</p>
-            <input type="password" id="groq-key-input" placeholder="gsk_..." class="w-full bg-hud-primary/5 border border-hud-primary/30 rounded p-2 text-xs font-mono text-hud-primary focus:outline-none focus:border-hud-primary mb-4">
-            <button onclick="saveApiKey()" class="w-full py-2 bg-hud-primary/10 border border-hud-primary/50 rounded text-[10px] font-hud tracking-widest hover:bg-hud-primary/20 transition-all">ACTIVATE LINK</button>
-            <p class="text-[9px] opacity-40 mt-4 leading-relaxed">Get your free key at <a href="https://console.groq.com" target="_blank" class="text-hud-primary underline">console.groq.com</a>. Link status will be updated upon activation.</p>
+            
+            <div class="space-y-4">
+                <div>
+                    <p class="text-[10px] opacity-60 mb-2 uppercase tracking-widest">Groq API Key</p>
+                    <input type="password" id="groq-key-input" placeholder="gsk_..." class="w-full bg-hud-primary/5 border border-hud-primary/30 rounded p-2 text-xs font-mono text-hud-primary focus:outline-none focus:border-hud-primary">
+                </div>
+                
+                <div>
+                    <p class="text-[10px] opacity-60 mb-2 uppercase tracking-widest">Local Bridge URL</p>
+                    <input type="text" id="bridge-url-input" placeholder="http://localhost:5001" class="w-full bg-hud-primary/5 border border-hud-primary/30 rounded p-2 text-xs font-mono text-hud-primary focus:outline-none focus:border-hud-primary">
+                    <p class="text-[8px] opacity-40 mt-1 italic">Default: http://localhost:5001</p>
+                </div>
+
+                <div id="connection-test-result" class="hidden p-2 rounded text-[9px] font-hud uppercase tracking-widest bg-white/5 border border-white/10"></div>
+
+                <div class="flex gap-2">
+                    <button onclick="testBridgeConnection()" class="flex-1 py-2 bg-hud-secondary/10 border border-hud-secondary/50 rounded text-[9px] font-hud tracking-widest hover:bg-hud-secondary/20 transition-all uppercase">Test Bridge</button>
+                    <button onclick="saveSettings()" class="flex-1 py-2 bg-hud-primary/10 border border-hud-primary/50 rounded text-[9px] font-hud tracking-widest hover:bg-hud-primary/20 transition-all uppercase">Save Configuration</button>
+                </div>
+            </div>
+
+            <div class="mt-6 pt-4 border-t border-white/10">
+                <p class="text-[9px] opacity-40 leading-relaxed">
+                    <span class="text-hud-gold font-bold uppercase">Hosted Mode (Vercel):</span><br>
+                    Browsers block 'Mixed Content' (HTTPS to HTTP). If you're on the Vercel app, use an HTTPS tunnel (like ngrok) or access the HUD directly via <a href="http://localhost:5001" class="text-hud-primary underline">localhost:5001</a>.
+                </p>
+            </div>
         </div>
         <button onclick="toggleSettings()" class="fixed top-6 right-6 z-[1001] px-4 py-1.5 bg-hud-primary/10 border border-hud-primary/30 rounded text-[10px] font-hud tracking-[0.2em] hover:bg-hud-primary/20 transition-all">⚙ SETTINGS</button>
 
@@ -371,7 +394,10 @@
 
         // --- JARVIS AI ENGINE (Groq) ---
         async function jarvisFetch(path, options) {
+            const bridgeUrl = localStorage.getItem('jarvis_bridge_url') || 'http://localhost:5001';
+            
             try {
+                // Try relative path first (works when hosted on the bridge)
                 const response = await fetch(path, options);
                 // Status 0 often means a blocked mixed-content request or network error
                 if (response.ok || (response.status !== 404 && response.status !== 0)) {
@@ -382,7 +408,7 @@
             }
             
             // Fallback to local bridge if relative path fails (common on hosted platforms like Vercel)
-            const localUrl = `http://localhost:5001${path.startsWith('/') ? '' : '/'}${path}`;
+            const localUrl = `${bridgeUrl.replace(/\/$/, '')}${path.startsWith('/') ? '' : '/'}${path}`;
             return fetch(localUrl, options);
         }
 
@@ -486,7 +512,8 @@ Execute all requests with dry British wit and peak efficiency.`
                 if (error.name === 'AbortError') {
                     return "Neural bridge timeout, Boss. The connection to the Groq brain took too long. Please try again.";
                 }
-                return `Neural link offline, Boss. I cannot reach the bridge at localhost:5001. Please ensure the 'dev_server.py' is running in the background. If you are using the hosted version (Vercel), you may need to allow mixed content or use the local URL for full system access.`;
+                const bridgeUrl = localStorage.getItem('jarvis_bridge_url') || 'http://localhost:5001';
+                return `Neural link offline, Boss. I cannot reach the bridge at ${bridgeUrl}. Please ensure the 'dev_server.py' is running in the background. If you are using the hosted version (Vercel), you may need to allow mixed content or use the local URL for full system access.`;
             }
         }
 
@@ -760,16 +787,52 @@ Execute all requests with dry British wit and peak efficiency.`
         window.toggleSettings = () => {
             const panel = document.getElementById('settings-panel');
             panel.classList.toggle('hidden');
+            
+            // Populate inputs
+            document.getElementById('groq-key-input').value = localStorage.getItem('jarvis_groq_key') || '';
+            document.getElementById('bridge-url-input').value = localStorage.getItem('jarvis_bridge_url') || 'http://localhost:5001';
         };
 
-        window.saveApiKey = () => {
-            const key = document.getElementById('groq-key-input').value.trim();
-            if (key) {
-                localStorage.setItem('jarvis_groq_key', key);
-                updateLinkUI('CONNECTED');
-                window.toggleSettings();
-                addMessage('JARVIS', 'Neural link established, Boss. Cognitive modules are now active.');
+        window.testBridgeConnection = async () => {
+            const bridgeUrl = document.getElementById('bridge-url-input').value.trim() || 'http://localhost:5001';
+            const resultEl = document.getElementById('connection-test-result');
+            
+            resultEl.classList.remove('hidden', 'text-hud-success', 'text-hud-danger');
+            resultEl.innerText = "TESTING CONNECTION...";
+            resultEl.classList.add('block');
+
+            try {
+                const res = await fetch(`${bridgeUrl.replace(/\/$/, '')}/execute`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ command: 'sys_info' })
+                });
+                
+                if (res.ok) {
+                    resultEl.innerText = "BRIDGE ONLINE: CONNECTION ESTABLISHED";
+                    resultEl.classList.add('text-hud-success');
+                } else {
+                    resultEl.innerText = `BRIDGE OFFLINE: HTTP ${res.status}`;
+                    resultEl.classList.add('text-hud-danger');
+                }
+            } catch (e) {
+                resultEl.innerText = "BRIDGE UNREACHABLE: CHECK BACKEND";
+                resultEl.classList.add('text-hud-danger');
+                console.error("Bridge test failed:", e);
             }
+        };
+
+        window.saveSettings = () => {
+            const key = document.getElementById('groq-key-input').value.trim();
+            const bridgeUrl = document.getElementById('bridge-url-input').value.trim() || 'http://localhost:5001';
+            
+            if (key) localStorage.setItem('jarvis_groq_key', key);
+            localStorage.setItem('jarvis_bridge_url', bridgeUrl);
+            
+            updateLinkUI(key ? 'CONNECTED' : 'DISCONNECTED');
+            window.toggleSettings();
+            
+            addMessage('JARVIS', 'Neural link configuration updated, Boss. Systems recalibrated.');
         };
 
         const chatMessages = document.getElementById('chat-messages');

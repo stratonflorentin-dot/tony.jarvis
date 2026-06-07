@@ -231,7 +231,12 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
-        if self.path == '/execute':
+        # Normalize path by removing trailing slashes
+        path = self.path.rstrip('/')
+        if not path.startswith('/'):
+            path = '/' + path
+
+        if path == '/execute':
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
             data = json.loads(post_data)
@@ -302,7 +307,7 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps({"success": False, "error": str(e)}).encode())
         
-        elif self.path == '/media':
+        elif path == '/media':
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
             data = json.loads(post_data)
@@ -317,9 +322,9 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                 res["success"] = True
                 res["level"] = media_ctrl.get_volume()
             elif action == 'play':
-                path = data.get('path')
-                if path:
-                    success, msg = media_ctrl.play_local(path)
+                path_to_play = data.get('path')
+                if path_to_play:
+                    success, msg = media_ctrl.play_local(path_to_play)
                     res["success"] = success
                     res["message"] = msg
                 else:
@@ -335,7 +340,7 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps(res).encode())
 
-        elif self.path == '/proxy':
+        elif path == '/proxy':
             # Proxy request to Groq API to avoid CORS/Network issues
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
@@ -382,7 +387,7 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps({"error": {"message": f"Bridge Connection Failed: {str(e)}"}}).encode())
 
-        elif self.path == '/search_music':
+        elif path == '/search_music':
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
             data = json.loads(post_data)
@@ -431,16 +436,16 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                         self.send_header('Content-Type', 'application/json')
                         self.send_header('Access-Control-Allow-Origin', '*')
                         self.end_headers()
-                        self.wfile.write(json.dumps({"success": False, "error": "Neural scan returned no valid stream identifiers."}).encode())
+                        self.wfile.write(json.dumps({"success": False, "error": {"message": "Neural scan returned no valid stream identifiers."}}).encode())
             except Exception as e:
                 print(f"[SEARCH] Critical Error: {e}")
                 self.send_response(500)
                 self.send_header('Content-Type', 'application/json')
                 self.send_header('Access-Control-Allow-Origin', '*')
                 self.end_headers()
-                self.wfile.write(json.dumps({"success": False, "error": f"Search Matrix Failure: {str(e)}"}).encode())
+                self.wfile.write(json.dumps({"success": False, "error": {"message": f"Search Matrix Failure: {str(e)}"}}).encode())
 
-        elif self.path == '/system':
+        elif path == '/system':
             content_length = int(self.headers['Content-Length'])
             post_data = self.rfile.read(content_length)
             data = json.loads(post_data)
@@ -466,9 +471,10 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                     webbrowser.open(data.get('url', 'https://google.com'))
                     res = {"success": True, "message": "Browser command executed"}
                 except Exception as e:
-                    res = {"success": False, "error": str(e)}
+                    res = {"success": False, "error": {"message": str(e)}}
             elif category == 'productivity':
-                success, msg = system_ctrl.manage_productivity(action, data.get('params', {}))
+                # Fix: Passing 3 arguments to manage_productivity
+                success, msg = system_ctrl.manage_productivity(action, None, data.get('params', {}))
                 res = {"success": success, "message": msg}
             
             system_ctrl.log_task(f"{category}:{action}", "COMPLETED" if res["success"] else "FAILED", res.get("message") or res.get("error"))
@@ -480,8 +486,12 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(json.dumps(res).encode())
 
         else:
+            print(f"[404] Route not found: {self.path}")
             self.send_response(404)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
             self.end_headers()
+            self.wfile.write(json.dumps({"error": {"message": f"Interface route '{self.path}' rejected request (Not Found)."}}).encode())
 
     def do_GET(self):
         if self.path == '/':

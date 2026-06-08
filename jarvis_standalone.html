@@ -163,10 +163,14 @@
             </div>
 
             <div class="mt-6 pt-4 border-t border-white/10">
-                <p class="text-[9px] opacity-40 leading-relaxed">
-                    <span class="text-hud-gold font-bold uppercase">Hosted Mode (Vercel):</span><br>
-                    Browsers block 'Mixed Content' (HTTPS to HTTP). If you're on the Vercel app, use an HTTPS tunnel (like ngrok) or access the HUD directly via <a href="http://localhost:5001" class="text-hud-primary underline">localhost:5001</a>.
+                <p class="text-[9px] opacity-60 leading-relaxed">
+                    <span class="text-hud-gold font-bold uppercase">Mixed Content Protocol:</span><br>
+                    Hosted apps (Vercel) use HTTPS. Browsers block connections to local HTTP bridges. To fix this:
                 </p>
+                <div class="mt-2 space-y-2">
+                    <a href="http://localhost:5001" target="_blank" class="block w-full py-2 bg-hud-primary/20 border border-hud-primary/50 rounded text-[9px] font-hud text-center hover:bg-hud-primary/30 transition-all">1. USE LOCAL HUD (RECOMMENDED)</a>
+                    <button onclick="window.open('https://ngrok.com/download', '_blank')" class="block w-full py-2 bg-hud-secondary/20 border border-hud-secondary/50 rounded text-[9px] font-hud text-center hover:bg-hud-secondary/30 transition-all">2. SETUP HTTPS TUNNEL (NGROK)</button>
+                </div>
             </div>
         </div>
         <button onclick="toggleSettings()" class="fixed top-6 right-6 z-[1001] px-4 py-1.5 bg-hud-primary/10 border border-hud-primary/30 rounded text-[10px] font-hud tracking-[0.2em] hover:bg-hud-primary/20 transition-all">⚙ SETTINGS</button>

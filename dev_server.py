@@ -498,17 +498,29 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
             self.path = '/jarvis_standalone.html'
         return super().do_GET()
 
-print(f"[INIT] Starting JARVIS Development Server...")
-print(f"[LINK] Hosting directory: {DIRECTORY}")
-print(f"[HUD]  URL: http://localhost:{PORT}")
+if __name__ == "__main__":
+    print("\n" + "="*50)
+    print("   JARVIS NEURAL BRIDGE - CORE INITIALIZATION")
+    print("="*50)
+    print(f"HUD_PATH: {DIRECTORY}")
+    print(f"PORT:     {PORT}")
+    print(f"OS:       {platform.system()} {platform.release()}")
+    print("-"*50)
+    print("\n[Vercel / Hosted HUD Instructions]")
+    print("If you are using the Vercel app (HTTPS), you have two options:")
+    print("1. RECOMMENDED: Open the local HUD directly at:")
+    print(f"   http://localhost:{PORT}")
+    print("2. ADVANCED: Use a secure tunnel (like ngrok) for HTTPS access:")
+    print(f"   Run: ngrok http {PORT}")
+    print("   Then paste the 'https://...' URL into HUD Settings -> Bridge URL.")
+    print("\n[STATUS] Neural bridge online and standing by...\n")
 
-try:
-    with socketserver.TCPServer(("", PORT), MyHandler) as httpd:
-        print("[SUCCESS] Systems online. Standing by, Boss.")
-        httpd.serve_forever()
-except KeyboardInterrupt:
-    print("\n[STOP] Powering down server...")
-    sys.exit(0)
-except Exception as e:
-    print(f"[ERROR] Failed to start server: {e}")
-    sys.exit(1)
+    try:
+        with socketserver.TCPServer(("", PORT), MyHandler) as httpd:
+            httpd.serve_forever()
+    except KeyboardInterrupt:
+        print("\n[OFFLINE] Neural bridge deactivated. Goodnight, Boss.")
+        sys.exit(0)
+    except Exception as e:
+        print(f"[ERROR] Failed to start server: {e}")
+        sys.exit(1)

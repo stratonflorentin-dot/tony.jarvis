@@ -399,7 +399,6 @@
             try {
                 // Try relative path first (works when hosted on the bridge)
                 const response = await fetch(path, options);
-                // Status 0 often means a blocked mixed-content request or network error
                 if (response.ok || (response.status !== 404 && response.status !== 0)) {
                     return response;
                 }
@@ -407,9 +406,18 @@
                 console.warn(`Relative fetch to ${path} failed, attempting local bridge fallback.`);
             }
             
-            // Fallback to local bridge if relative path fails (common on hosted platforms like Vercel)
-            const localUrl = `${bridgeUrl.replace(/\/$/, '')}${path.startsWith('/') ? '' : '/'}${path}`;
-            return fetch(localUrl, options);
+            // Primary Fallback: User-configured bridge URL
+            try {
+                const localUrl = `${bridgeUrl.replace(/\/$/, '')}${path.startsWith('/') ? '' : '/'}${path}`;
+                const res = await fetch(localUrl, options);
+                if (res.ok || res.status !== 0) return res;
+            } catch (e) {
+                console.warn("Primary bridge fallback failed, trying direct IP...");
+            }
+
+            // Secondary Fallback: Direct IP (bypasses some localhost resolution issues)
+            const directIpUrl = `http://127.0.0.1:5001${path.startsWith('/') ? '' : '/'}${path}`;
+            return fetch(directIpUrl, options);
         }
 
         async function askJarvis(userMessage, conversationHistory = []) {
@@ -513,7 +521,10 @@ Execute all requests with dry British wit and peak efficiency.`
                     return "Neural bridge timeout, Boss. The connection to the Groq brain took too long. Please try again.";
                 }
                 const bridgeUrl = localStorage.getItem('jarvis_bridge_url') || 'http://localhost:5001';
-                return `Neural link offline, Boss. I cannot reach the bridge at ${bridgeUrl}. Please ensure the 'dev_server.py' is running in the background. If you are using the hosted version (Vercel), you may need to allow mixed content or use the local URL for full system access.`;
+                const isHttps = window.location.protocol === 'https:';
+                const mixedContentMsg = isHttps ? `<br><br><span class="text-hud-gold">SECURITY ALERT:</span> You are on an HTTPS site (Vercel) trying to reach an HTTP bridge. Browsers block this by default. <br><br> <a href="${bridgeUrl}" target="_blank" class="px-4 py-2 bg-hud-primary/20 border border-hud-primary rounded text-[10px] inline-block mt-2">OPEN LOCAL HUD (BYPASS BLOCK)</a>` : '';
+                
+                return `Neural link offline, Boss. I cannot reach the bridge at ${bridgeUrl}. Please ensure the 'dev_server.py' is running in the background.${mixedContentMsg}`;
             }
         }
 

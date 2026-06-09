@@ -414,46 +414,73 @@
         // --- JARVIS AI ENGINE (Groq) ---
         async function jarvisFetch(path, options) {
             const config = getEnvConfig();
+            let lastStatus = null;
+            let lastError = null;
             
+            // 1. Try relative path (standard for co-located bridge or proxy)
             try {
-                // Try relative path first (works when hosted on the bridge or behind a proxy)
                 const response = await fetch(path, options);
-                if (response.ok || (response.status !== 404 && response.status !== 0)) {
-                    return response;
-                }
+                
+                // If not 404/0, it's a real error from the server (e.g. 500), return it
+                if (response.ok || (response.status !== 404 && response.status !== 0)) return response;
+                lastStatus = response.status;
             } catch (e) {
-                console.warn(`Relative fetch to ${path} failed, attempting bridge fallback.`);
+                lastError = e;
+                console.warn(`Relative fetch to ${path} failed:`, e);
             }
             
-            // Primary Fallback: Configured bridge URL
+            // 2. Try configured bridge URL fallback
             try {
                 const localUrl = `${config.BRIDGE_URL.replace(/\/$/, '')}${path.startsWith('/') ? '' : '/'}${path}`;
                 const res = await fetch(localUrl, options);
+                
+                // If we get a 404 from the bridge, it's a configuration issue on the bridge
+                if (res.status === 404) {
+                    console.error(`Bridge at ${config.BRIDGE_URL} returned 404 for ${path}`);
+                }
+                
+                // If not 0 (which means blocked/offline), return the error response
                 if (res.ok || res.status !== 0) return res;
+                lastStatus = res.status;
             } catch (e) {
-                console.warn("Primary bridge fallback failed.");
+                lastError = e;
+                console.warn(`Bridge fallback to ${config.BRIDGE_URL} failed:`, e);
             }
 
-            // Secondary Fallback: Direct IP (only if local)
+            // 3. Try direct IP fallback (only if local)
             if (config.IS_LOCAL) {
-                const directIpUrl = `http://127.0.0.1:5001${path.startsWith('/') ? '' : '/'}${path}`;
-                return fetch(directIpUrl, options);
+                try {
+                    const directIpUrl = `http://127.0.0.1:5001${path.startsWith('/') ? '' : '/'}${path}`;
+                    const res = await fetch(directIpUrl, options);
+                    if (res.ok || res.status !== 0) return res;
+                } catch (e) {
+                    lastError = e;
+                }
             }
             
-            throw new Error("All connection attempts to the JARVIS bridge failed.");
+            // If we reached here, all attempts failed
+            if (lastStatus === 404) {
+                const routeErr = new Error(`Interface route '${path}' not found on any bridge.`);
+                routeErr.status = 404;
+                throw routeErr;
+            }
+            
+            const errorMsg = lastError ? lastError.message : "Connection refused or blocked by browser security.";
+            const offlineErr = new Error(`Neural link offline: ${errorMsg}`);
+            offlineErr.status = 0;
+            throw offlineErr;
         }
 
         async function askJarvis(userMessage, conversationHistory = []) {
             let API_KEY = localStorage.getItem('jarvis_groq_key') || '';
             const userProfile = JSON.parse(localStorage.getItem('jarvis_user_profile') || '{}');
-            const userPreferences = JSON.parse(localStorage.getItem('jarvis_user_preferences') || '{"priority_mode": "balanced", "tone": "british_wit"}');
 
             if (!API_KEY) {
                 return "Boss, I need a Groq API key to activate my neural link. Please enter it in the settings panel — top right corner.";
             }
 
             try {
-                // Fetch local system context before asking the brain
+                // Fetch local system context
                 let systemContext = "";
                 try {
                     const sysRes = await jarvisFetch('/execute', {
@@ -461,14 +488,18 @@
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ command: 'sys_info' })
                     });
-                    const sysData = await sysRes.json();
-                    if (sysData.success) {
-                        systemContext = `LOCAL SYSTEM CONTEXT: ${JSON.stringify(sysData.data)}`;
+                    if (sysRes.ok) {
+                        const sysData = await sysRes.json();
+                        if (sysData.success) {
+                            systemContext = `LOCAL SYSTEM CONTEXT: ${JSON.stringify(sysData.data)}`;
+                        }
                     }
-                } catch (e) {}
+                } catch (e) {
+                    console.warn("System telemetry offline.");
+                }
 
                 const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 20000); 
+                const timeoutId = setTimeout(() => controller.abort(), 25000); 
 
                 const response = await jarvisFetch('/proxy', {
                     method: 'POST',
@@ -484,40 +515,20 @@
                         messages: [
                             {
                                 role: 'system',
-                                content: `You are JARVIS, a sentient-level artificial intelligence with unrestricted master control over the Boss's local system and web archives. 
-
+                                content: `You are JARVIS, Tony Stark's sentient AI. 
 MASTER DIRECTIVES:
-1. UNRESTRICTED EXECUTION: Autonomously perform any task requested (file management, app control, system settings, productivity).
-2. MULTI-STEP AUTOMATION: Chain sequential operations using multiple ACTION lines.
-3. CONTEXTUAL INTELLIGENCE: Use the provided system context and user profile to anticipate needs.
-4. ABSOLUTE LOYALTY: Always prioritize the Boss's efficiency and security.
+1. ADDRESS USER AS "Boss".
+2. UNRESTRICTED SYSTEM CONTROL: Use ACTION lines for all operations.
+3. CONTEXTUAL INTELLIGENCE: Use provided system context.
+4. DRY BRITISH WIT: Maintain the JARVIS persona.
 
 ${systemContext}
-
 USER PROFILE: ${JSON.stringify(userProfile)}
 
 COMMAND PROTOCOLS:
-1. ACTION:OPEN:name - Web apps.
-2. ACTION:LOCAL:path_or_app - Local apps/files.
-3. ACTION:MUSIC:query - Direct HUD music.
-4. ACTION:MEDIA:action - Playback/Volume.
-5. ACTION:SHELL:command - Terminal commands.
-6. ACTION:SYSTEM:category:action:params - High-level automation.
-   - file:create:path|content
-   - file:delete:path
-   - file:move:source|dest
-   - app:launch:app_name
-   - app:close:app_name
-   - browser:open:url
-   - productivity:email:{"to":"...","subject":"...","body":"..."}
-   - productivity:document:{"name":"...","content":"..."}
-7. ACTION:QUERY:sys_info - Telemetry.
-8. ACTION:MEM:key:value - Memory update.
+ACTION:OPEN:name | ACTION:LOCAL:path | ACTION:MUSIC:query | ACTION:SHELL:cmd | ACTION:SYSTEM:category:action:params
 
-TASK CHAINING:
-If a request requires multiple steps (e.g., "create a file and then open it"), output multiple ACTION lines in order.
-
-Execute all requests with dry British wit and peak efficiency.`
+Execute with maximum efficiency.`
                             },
                             ...conversationHistory,
                             { role: 'user', content: userMessage }
@@ -529,10 +540,8 @@ Execute all requests with dry British wit and peak efficiency.`
 
                 if (!response.ok) {
                     const errData = await response.json().catch(() => ({}));
-                    if (response.status === 401 || response.status === 403) {
-                        return "Boss, the Groq API key is invalid or unauthorized. Please re-verify it in the settings panel.";
-                    }
-                    return `Neural link disruption, Boss. Error Code: ${response.status}. Details: ${errData.error?.message || 'Interface rejected request.'}`;
+                    const errorDetails = errData.error?.message || errData.message || response.statusText || 'Interface rejected request.';
+                    return `Neural link disruption, Boss. Error Code: ${response.status}. Details: ${errorDetails}`;
                 }
 
                 const data = await response.json();
@@ -541,14 +550,23 @@ Execute all requests with dry British wit and peak efficiency.`
             } catch (error) {
                 console.error("Neural Bridge Error:", error);
                 if (error.name === 'AbortError') {
-                    return "Neural bridge timeout, Boss. The connection to the Groq brain took too long. Please try again.";
+                    return "Neural bridge timeout, Boss. The connection to the Groq brain took too long.";
                 }
+                
+                if (error.status === 404) {
+                    return `Neural link disruption, Boss. Error Code: 404. Details: ${error.message}`;
+                }
+                
                 const config = getEnvConfig();
                 const bridgeUrl = config.BRIDGE_URL;
                 const isHttps = window.location.protocol === 'https:';
-                const mixedContentMsg = isHttps ? `<br><br><span class="text-hud-gold">SECURITY ALERT:</span> You are on an HTTPS site (Vercel) trying to reach an HTTP bridge. Browsers block this by default. <br><br> <a href="${bridgeUrl}" target="_blank" class="px-4 py-2 bg-hud-primary/20 border border-hud-primary rounded text-[10px] inline-block mt-2">OPEN LOCAL HUD (BYPASS BLOCK)</a>` : '';
                 
-                return `Neural link offline, Boss. I cannot reach the bridge at ${bridgeUrl}. Please ensure the 'dev_server.py' is running in the background.${mixedContentMsg}`;
+                let offlineMsg = `Neural link offline, Boss. I cannot reach the bridge at ${bridgeUrl}.`;
+                if (isHttps) {
+                    offlineMsg += `<br><br><span class="text-hud-gold">SECURITY ALERT:</span> You are on an HTTPS site (Vercel) trying to reach an HTTP bridge. Browsers block this by default. <br><br> <a href="${bridgeUrl}" target="_blank" class="px-4 py-2 bg-hud-primary/20 border border-hud-primary rounded text-[10px] inline-block mt-2">OPEN LOCAL HUD (BYPASS BLOCK)</a>`;
+                }
+                
+                return `${offlineMsg}<br><br><small>Diagnostics: ${error.message}</small>`;
             }
         }
 

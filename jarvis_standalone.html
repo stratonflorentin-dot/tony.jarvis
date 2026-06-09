@@ -414,16 +414,21 @@
         // --- JARVIS AI ENGINE (Groq) ---
         async function jarvisFetch(path, options) {
             const config = getEnvConfig();
-            let lastStatus = null;
+            let bridgeReached = false;
             let lastError = null;
             
             // 1. Try relative path (standard for co-located bridge or proxy)
             try {
                 const response = await fetch(path, options);
+                if (response.ok) return response;
+                
+                // If we are local, the relative path IS the bridge (via Vite proxy)
+                if (config.IS_LOCAL && response.status === 404) {
+                    bridgeReached = true;
+                }
                 
                 // If not 404/0, it's a real error from the server (e.g. 500), return it
-                if (response.ok || (response.status !== 404 && response.status !== 0)) return response;
-                lastStatus = response.status;
+                if (response.status !== 404 && response.status !== 0) return response;
             } catch (e) {
                 lastError = e;
                 console.warn(`Relative fetch to ${path} failed:`, e);
@@ -433,15 +438,15 @@
             try {
                 const localUrl = `${config.BRIDGE_URL.replace(/\/$/, '')}${path.startsWith('/') ? '' : '/'}${path}`;
                 const res = await fetch(localUrl, options);
+                if (res.ok) return res;
                 
-                // If we get a 404 from the bridge, it's a configuration issue on the bridge
                 if (res.status === 404) {
+                    bridgeReached = true;
                     console.error(`Bridge at ${config.BRIDGE_URL} returned 404 for ${path}`);
                 }
                 
                 // If not 0 (which means blocked/offline), return the error response
-                if (res.ok || res.status !== 0) return res;
-                lastStatus = res.status;
+                if (res.status !== 0) return res;
             } catch (e) {
                 lastError = e;
                 console.warn(`Bridge fallback to ${config.BRIDGE_URL} failed:`, e);
@@ -452,14 +457,16 @@
                 try {
                     const directIpUrl = `http://127.0.0.1:5001${path.startsWith('/') ? '' : '/'}${path}`;
                     const res = await fetch(directIpUrl, options);
-                    if (res.ok || res.status !== 0) return res;
+                    if (res.ok) return res;
+                    if (res.status === 404) bridgeReached = true;
+                    if (res.status !== 0) return res;
                 } catch (e) {
                     lastError = e;
                 }
             }
             
             // If we reached here, all attempts failed
-            if (lastStatus === 404) {
+            if (bridgeReached) {
                 const routeErr = new Error(`Interface route '${path}' not found on any bridge.`);
                 routeErr.status = 404;
                 throw routeErr;

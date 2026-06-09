@@ -20,7 +20,7 @@ JARVIS has been upgraded to an **Advanced AI Architecture**, incorporating NLP, 
 
 2. **Access the HUD**:
    Open your browser and navigate to:
-   [http://localhost:5001](http://localhost:5001)
+   Access the HUD via the provided local URL (usually `http://localhost:5001`).
 
 3. **Configure API Key**:
    - Click the **⚙ SETTINGS** button in the top-right corner.

@@ -137,7 +137,7 @@ pip install anthropic flask flask-cors SpeechRecognition pyttsx3 pyaudio psutil 
 
 ### Step 3 — Connect the UI to the backend
 
-In `jarvis_ui.html`, the UI is preconfigured to use `http://localhost:5000/jarvis`.
+The UI is preconfigured to automatically detect the neural bridge location. In local development, it uses `http://localhost:5001`.
 
 ### Step 4 — Run everything
 

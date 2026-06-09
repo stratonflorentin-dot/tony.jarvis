@@ -150,8 +150,8 @@
                 
                 <div>
                     <p class="text-[10px] opacity-60 mb-2 uppercase tracking-widest">Local Bridge URL</p>
-                    <input type="text" id="bridge-url-input" placeholder="http://localhost:5001" class="w-full bg-hud-primary/5 border border-hud-primary/30 rounded p-2 text-xs font-mono text-hud-primary focus:outline-none focus:border-hud-primary">
-                    <p class="text-[8px] opacity-40 mt-1 italic">Default: http://localhost:5001</p>
+                    <input type="text" id="bridge-url-input" placeholder="Neural Link URL" class="w-full bg-hud-primary/5 border border-hud-primary/30 rounded p-2 text-xs font-mono text-hud-primary focus:outline-none focus:border-hud-primary">
+                    <p id="bridge-url-hint" class="text-[8px] opacity-40 mt-1 italic"></p>
                 </div>
 
                 <div id="connection-test-result" class="hidden p-2 rounded text-[9px] font-hud uppercase tracking-widest bg-white/5 border border-white/10"></div>
@@ -168,7 +168,7 @@
                     Hosted apps (Vercel) use HTTPS. Browsers block connections to local HTTP bridges. To fix this:
                 </p>
                 <div class="mt-2 space-y-2">
-                    <a href="http://localhost:5001" target="_blank" class="block w-full py-2 bg-hud-primary/20 border border-hud-primary/50 rounded text-[9px] font-hud text-center hover:bg-hud-primary/30 transition-all">1. USE LOCAL HUD (RECOMMENDED)</a>
+                    <a id="local-hud-link" href="http://localhost:5001" target="_blank" class="block w-full py-2 bg-hud-primary/20 border border-hud-primary/50 rounded text-[9px] font-hud text-center hover:bg-hud-primary/30 transition-all">1. USE LOCAL HUD (RECOMMENDED)</a>
                     <button onclick="window.open('https://ngrok.com/download', '_blank')" class="block w-full py-2 bg-hud-secondary/20 border border-hud-secondary/50 rounded text-[9px] font-hud text-center hover:bg-hud-secondary/30 transition-all">2. SETUP HTTPS TUNNEL (NGROK)</button>
                 </div>
             </div>
@@ -396,32 +396,51 @@
             });
         };
 
+        // --- CONFIGURATION ---
+         const getEnvConfig = () => {
+             const isLocal = window.location.hostname === 'localhost' || 
+                            window.location.hostname === '127.0.0.1' || 
+                            window.location.hostname.startsWith('192.168.');
+             
+             // In production (Vercel), we default to the current origin
+             const defaultBridge = isLocal ? 'http://localhost:5001' : window.location.origin;
+             
+             return {
+                 BRIDGE_URL: localStorage.getItem('jarvis_bridge_url') || defaultBridge,
+                 IS_LOCAL: isLocal
+             };
+         };
+
         // --- JARVIS AI ENGINE (Groq) ---
         async function jarvisFetch(path, options) {
-            const bridgeUrl = localStorage.getItem('jarvis_bridge_url') || 'http://localhost:5001';
+            const config = getEnvConfig();
             
             try {
-                // Try relative path first (works when hosted on the bridge)
+                // Try relative path first (works when hosted on the bridge or behind a proxy)
                 const response = await fetch(path, options);
                 if (response.ok || (response.status !== 404 && response.status !== 0)) {
                     return response;
                 }
             } catch (e) {
-                console.warn(`Relative fetch to ${path} failed, attempting local bridge fallback.`);
+                console.warn(`Relative fetch to ${path} failed, attempting bridge fallback.`);
             }
             
-            // Primary Fallback: User-configured bridge URL
+            // Primary Fallback: Configured bridge URL
             try {
-                const localUrl = `${bridgeUrl.replace(/\/$/, '')}${path.startsWith('/') ? '' : '/'}${path}`;
+                const localUrl = `${config.BRIDGE_URL.replace(/\/$/, '')}${path.startsWith('/') ? '' : '/'}${path}`;
                 const res = await fetch(localUrl, options);
                 if (res.ok || res.status !== 0) return res;
             } catch (e) {
-                console.warn("Primary bridge fallback failed, trying direct IP...");
+                console.warn("Primary bridge fallback failed.");
             }
 
-            // Secondary Fallback: Direct IP (bypasses some localhost resolution issues)
-            const directIpUrl = `http://127.0.0.1:5001${path.startsWith('/') ? '' : '/'}${path}`;
-            return fetch(directIpUrl, options);
+            // Secondary Fallback: Direct IP (only if local)
+            if (config.IS_LOCAL) {
+                const directIpUrl = `http://127.0.0.1:5001${path.startsWith('/') ? '' : '/'}${path}`;
+                return fetch(directIpUrl, options);
+            }
+            
+            throw new Error("All connection attempts to the JARVIS bridge failed.");
         }
 
         async function askJarvis(userMessage, conversationHistory = []) {
@@ -524,7 +543,8 @@ Execute all requests with dry British wit and peak efficiency.`
                 if (error.name === 'AbortError') {
                     return "Neural bridge timeout, Boss. The connection to the Groq brain took too long. Please try again.";
                 }
-                const bridgeUrl = localStorage.getItem('jarvis_bridge_url') || 'http://localhost:5001';
+                const config = getEnvConfig();
+                const bridgeUrl = config.BRIDGE_URL;
                 const isHttps = window.location.protocol === 'https:';
                 const mixedContentMsg = isHttps ? `<br><br><span class="text-hud-gold">SECURITY ALERT:</span> You are on an HTTPS site (Vercel) trying to reach an HTTP bridge. Browsers block this by default. <br><br> <a href="${bridgeUrl}" target="_blank" class="px-4 py-2 bg-hud-primary/20 border border-hud-primary rounded text-[10px] inline-block mt-2">OPEN LOCAL HUD (BYPASS BLOCK)</a>` : '';
                 
@@ -803,13 +823,18 @@ Execute all requests with dry British wit and peak efficiency.`
             const panel = document.getElementById('settings-panel');
             panel.classList.toggle('hidden');
             
+            const config = getEnvConfig();
             // Populate inputs
             document.getElementById('groq-key-input').value = localStorage.getItem('jarvis_groq_key') || '';
-            document.getElementById('bridge-url-input').value = localStorage.getItem('jarvis_bridge_url') || 'http://localhost:5001';
+            document.getElementById('bridge-url-input').value = localStorage.getItem('jarvis_bridge_url') || '';
+            document.getElementById('bridge-url-input').placeholder = config.BRIDGE_URL;
+            document.getElementById('bridge-url-hint').innerText = `Active Link: ${config.BRIDGE_URL}`;
+            document.getElementById('local-hud-link').href = config.BRIDGE_URL;
         };
 
         window.testBridgeConnection = async () => {
-            const bridgeUrl = document.getElementById('bridge-url-input').value.trim() || 'http://localhost:5001';
+            const config = getEnvConfig();
+            const bridgeUrl = document.getElementById('bridge-url-input').value.trim() || config.BRIDGE_URL;
             const resultEl = document.getElementById('connection-test-result');
             
             resultEl.classList.remove('hidden', 'text-hud-success', 'text-hud-danger');
@@ -838,11 +863,13 @@ Execute all requests with dry British wit and peak efficiency.`
         };
 
         window.saveSettings = () => {
+            const config = getEnvConfig();
             const key = document.getElementById('groq-key-input').value.trim();
-            const bridgeUrl = document.getElementById('bridge-url-input').value.trim() || 'http://localhost:5001';
+            const bridgeUrl = document.getElementById('bridge-url-input').value.trim();
             
             if (key) localStorage.setItem('jarvis_groq_key', key);
-            localStorage.setItem('jarvis_bridge_url', bridgeUrl);
+            if (bridgeUrl) localStorage.setItem('jarvis_bridge_url', bridgeUrl);
+            else localStorage.removeItem('jarvis_bridge_url'); // Reset to default
             
             updateLinkUI(key ? 'CONNECTED' : 'DISCONNECTED');
             window.toggleSettings();

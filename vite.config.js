@@ -1,22 +1,27 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 
-export default defineConfig({
-  build: {
-    outDir: 'dist',
-    rollupOptions: {
-      input: {
-        main: './index.html'
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '');
+  const bridgeTarget = env.VITE_BRIDGE_URL || 'http://localhost:5001';
+
+  return {
+    build: {
+      outDir: 'dist',
+      rollupOptions: {
+        input: {
+          main: './index.html'
+        }
+      }
+    },
+    server: {
+      port: 3000,
+      proxy: {
+        '/proxy': bridgeTarget,
+        '/execute': bridgeTarget,
+        '/system': bridgeTarget,
+        '/search_music': bridgeTarget,
+        '/media': bridgeTarget
       }
     }
-  },
-  server: {
-    port: 3000,
-    proxy: {
-      '/proxy': 'http://localhost:5001',
-      '/execute': 'http://localhost:5001',
-      '/system': 'http://localhost:5001',
-      '/search_music': 'http://localhost:5001',
-      '/media': 'http://localhost:5001'
-    }
-  }
+  };
 });

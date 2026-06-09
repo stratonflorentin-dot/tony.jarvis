@@ -499,17 +499,22 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
         return super().do_GET()
 
 if __name__ == "__main__":
+    hostname = socket.gethostname()
+    local_ip = socket.gethostbyname(hostname)
+    
     print("\n" + "="*50)
     print("   JARVIS NEURAL BRIDGE - CORE INITIALIZATION")
     print("="*50)
     print(f"HUD_PATH: {DIRECTORY}")
     print(f"PORT:     {PORT}")
+    print(f"LOCAL IP: {local_ip}")
     print(f"OS:       {platform.system()} {platform.release()}")
     print("-"*50)
     print("\n[Vercel / Hosted HUD Instructions]")
     print("If you are using the Vercel app (HTTPS), you have two options:")
     print("1. RECOMMENDED: Open the local HUD directly at:")
     print(f"   http://localhost:{PORT}")
+    print(f"   http://{local_ip}:{PORT}")
     print("2. ADVANCED: Use a secure tunnel (like ngrok) for HTTPS access:")
     print(f"   Run: ngrok http {PORT}")
     print("   Then paste the 'https://...' URL into HUD Settings -> Bridge URL.")

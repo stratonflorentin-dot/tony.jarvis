@@ -26,7 +26,7 @@
 ### 4. Dependency & Persona Harmonization
 - **PortAudio/PyAudio**: Addressed installation blockers by providing `sounddevice` workarounds and system-level installation guides.
 - **Persona**: Standardized "Sir" as the preferred form of address and "Tony" as the wake word across React and Python modules.
-- **Neural Bridge Connectivity**: Resolved "Unable to reach backend bridge" by switching to Port 5001, implementing dual-URL fetch (localhost/127.0.0.1), and maximizing CORS permissiveness.
+- **Neural Bridge Connectivity**: Resolved connectivity issues by implementing dynamic environment-aware configuration. **Strict Security Protocol** enforced: Prohibited all loopback addresses in favor of proper hostnames and local network IPs. Added startup validation and pre-commit enforcement.
 
 ### 5. Final Audit & Validation
 - Verified all 11 non-negotiable requirements from the original prompt.

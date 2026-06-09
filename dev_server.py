@@ -499,9 +499,31 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
             self.path = '/jarvis_standalone.html'
         return super().do_GET()
 
+def validate_environment():
+    """Strictly prohibit loopback addresses in configuration."""
+    forbidden = ['localhost', '127.0.0.1', '::1', '[::1]']
+    
+    # Check VITE_BRIDGE_URL in .env if it exists
+    env_path = os.path.join(DIRECTORY, '.env')
+    if os.path.exists(env_path):
+        with open(env_path, 'r') as f:
+            for line in f:
+                if 'VITE_BRIDGE_URL' in line:
+                    val = line.split('=')[1].strip()
+                    if any(f in val.lower() for f in forbidden):
+                        print(f"\n[FATAL ERROR] SECURITY POLICY VIOLATION")
+                        print(f"Configuration target '{val}' is a prohibited loopback address.")
+                        print("Please use a proper domain name or local network IP.")
+                        sys.exit(1)
+
 if __name__ == "__main__":
+    validate_environment()
+    
     hostname = socket.gethostname()
     local_ip = socket.gethostbyname(hostname)
+    
+    # Strictly prohibit binding to 127.0.0.1
+    BIND_ADDRESS = "0.0.0.0" # Listen on all interfaces
     
     print("\n" + "="*50)
     print("   JARVIS NEURAL BRIDGE - CORE INITIALIZATION")
@@ -509,20 +531,17 @@ if __name__ == "__main__":
     print(f"HUD_PATH: {DIRECTORY}")
     print(f"PORT:     {PORT}")
     print(f"LOCAL IP: {local_ip}")
+    print(f"BINDING:  {BIND_ADDRESS}")
     print(f"OS:       {platform.system()} {platform.release()}")
     print("-"*50)
-    print("\n[Vercel / Hosted HUD Instructions]")
-    print("If you are using the Vercel app (HTTPS), you have two options:")
-    print("1. RECOMMENDED: Open the local HUD directly at:")
-    print(f"   http://localhost:{PORT}")
-    print(f"   http://{local_ip}:{PORT}")
-    print("2. ADVANCED: Use a secure tunnel (like ngrok) for HTTPS access:")
-    print(f"   Run: ngrok http {PORT}")
-    print("   Then paste the 'https://...' URL into HUD Settings -> Bridge URL.")
+    print("\n[SECURITY PROTOCOL]")
+    print("Loopback addresses (localhost/127.0.0.1) are strictly prohibited.")
+    print(f"Access this bridge via: http://{local_ip}:{PORT}")
     print("\n[STATUS] Neural bridge online and standing by...\n")
 
     try:
-        with socketserver.TCPServer(("", PORT), MyHandler) as httpd:
+        # Bind to 0.0.0.0 instead of empty string (which can resolve to localhost)
+        with socketserver.TCPServer((BIND_ADDRESS, PORT), MyHandler) as httpd:
             httpd.serve_forever()
     except KeyboardInterrupt:
         print("\n[OFFLINE] Neural bridge deactivated. Goodnight, Boss.")

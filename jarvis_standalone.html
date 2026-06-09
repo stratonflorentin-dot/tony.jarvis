@@ -397,17 +397,48 @@
         };
 
         // --- CONFIGURATION ---
+        const isLocalhost = (host) => {
+            const forbidden = ['localhost', '127.0.0.1', '[::1]', '::1'];
+            return forbidden.some(f => host.toLowerCase().includes(f));
+        };
+
+        const validateUrl = (url) => {
+            if (!url) return true;
+            try {
+                const parsed = new URL(url.startsWith('http') ? url : `http://${url}`);
+                if (isLocalhost(parsed.hostname)) {
+                    throw new Error(`SECURITY POLICY VIOLATION: '${parsed.hostname}' is a prohibited loopback target.`);
+                }
+                return true;
+            } catch (e) {
+                throw e;
+            }
+        };
+
          const getEnvConfig = () => {
-             const isLocal = window.location.hostname === 'localhost' || 
-                            window.location.hostname === '127.0.0.1' || 
-                            window.location.hostname.startsWith('192.168.');
+             const hostname = window.location.hostname;
              
+             if (isLocalhost(hostname)) {
+                 console.error("SYSTEM ALERT: HUD is running on a prohibited loopback interface.");
+             }
+
+             const storedBridge = localStorage.getItem('jarvis_bridge_url');
+             if (storedBridge) {
+                 try {
+                     validateUrl(storedBridge);
+                 } catch (e) {
+                     console.error(e.message);
+                     localStorage.removeItem('jarvis_bridge_url');
+                 }
+             }
+
              // In production (Vercel), we default to the current origin
-             const defaultBridge = isLocal ? 'http://localhost:5001' : window.location.origin;
+             // For non-localhost local development, we use the current origin as well
+             const defaultBridge = window.location.origin;
              
              return {
                  BRIDGE_URL: localStorage.getItem('jarvis_bridge_url') || defaultBridge,
-                 IS_LOCAL: isLocal
+                 IS_LOCAL: hostname !== 'tony-jarvis-sigma.vercel.app' // Example production domain
              };
          };
 
@@ -417,17 +448,23 @@
             let bridgeReached = false;
             let lastError = null;
             
+            // Validate target before fetching
+            try {
+                validateUrl(config.BRIDGE_URL);
+            } catch (e) {
+                throw new Error(`Neural link offline: ${e.message}`);
+            }
+            
             // 1. Try relative path (standard for co-located bridge or proxy)
             try {
                 const response = await fetch(path, options);
                 if (response.ok) return response;
                 
-                // If we are local, the relative path IS the bridge (via Vite proxy)
-                if (config.IS_LOCAL && response.status === 404) {
+                // Relative path on a non-localhost host is considered safe
+                if (response.status === 404) {
                     bridgeReached = true;
                 }
                 
-                // If not 404/0, it's a real error from the server (e.g. 500), return it
                 if (response.status !== 404 && response.status !== 0) return response;
             } catch (e) {
                 lastError = e;
@@ -445,27 +482,14 @@
                     console.error(`Bridge at ${config.BRIDGE_URL} returned 404 for ${path}`);
                 }
                 
-                // If not 0 (which means blocked/offline), return the error response
                 if (res.status !== 0) return res;
             } catch (e) {
                 lastError = e;
                 console.warn(`Bridge fallback to ${config.BRIDGE_URL} failed:`, e);
             }
-
-            // 3. Try direct IP fallback (only if local)
-            if (config.IS_LOCAL) {
-                try {
-                    const directIpUrl = `http://127.0.0.1:5001${path.startsWith('/') ? '' : '/'}${path}`;
-                    const res = await fetch(directIpUrl, options);
-                    if (res.ok) return res;
-                    if (res.status === 404) bridgeReached = true;
-                    if (res.status !== 0) return res;
-                } catch (e) {
-                    lastError = e;
-                }
-            }
             
-            // If we reached here, all attempts failed
+            // 3. Removed Direct IP fallback (Loopback Prohibited)
+            
             if (bridgeReached) {
                 const routeErr = new Error(`Interface route '${path}' not found on any bridge.`);
                 routeErr.status = 404;

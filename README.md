@@ -19,8 +19,9 @@ JARVIS has been upgraded to an **Advanced AI Architecture**, incorporating NLP, 
    ```
 
 2. **Access the HUD**:
-   Open your browser and navigate to:
-   Access the HUD via the provided local URL (usually `http://localhost:5001`).
+   Open your browser and navigate to the local network address provided in the terminal output (e.g., `http://jarvis.local:5001`). 
+   
+   **SECURITY NOTICE**: This system strictly prohibits the use of loopback addresses for connection targets. Always use a proper domain name or local network IP.
 
 3. **Configure API Key**:
    - Click the **⚙ SETTINGS** button in the top-right corner.

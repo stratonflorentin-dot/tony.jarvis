@@ -32,3 +32,6 @@ dist-ssr
 
 # Build files
 build/
+
+# Claude settings
+.claude/settings.local.json

@@ -632,6 +632,19 @@ Execute with maximum efficiency.` },
                 continue;
             }
 
+            if (actionLine.startsWith('ACTION:SHELL:')) {
+                const shellCmd = actionLine.replace('ACTION:SHELL:', '').trim();
+                addTask('SHELL');
+                logTerminal(`SHELL: ${shellCmd}`);
+                try {
+                    const res = await aegisFetch('/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: `shell:${shellCmd}` }) });
+                    const data = await res.json();
+                    logTerminal(`SHELL -> ${data.success ? 'SUCCESS' : 'FAILED'}${data.output ? ': ' + data.output.trim().slice(0, 200) : ''}`);
+                } catch (e) { logTerminal('SHELL -> ERROR'); }
+                completeTask('SHELL');
+                continue;
+            }
+
             if (actionLine.startsWith('ACTION:SYSTEM:')) {
                 const parts = actionLine.replace('ACTION:SYSTEM:', '').split(':');
                 const category = parts[0], action = parts[1];

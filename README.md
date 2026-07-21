@@ -1,45 +1,59 @@
-# JARVIS — Advanced Neural Intelligence HUD
+# AEGIS — Instrument Console
 
-JARVIS has been upgraded to an **Advanced AI Architecture**, incorporating NLP, machine learning principles, and predictive context awareness.
+AEGIS (formerly JARVIS) is a voice-driven AI assistant with a real system-control backend: it can chat, open apps, search and play music, and control your PC's power state (shutdown/restart/sleep/lock) — all through a local Python bridge.
 
-## Advanced AI Features
+There are two ways to run it, and they share the same code:
 
-- **Cognitive Matrix HUD**: Real-time visualization of JARVIS's reasoning engine, context awareness levels, and predictive load.
-- **Long-Term Memory (LTM)**: JARVIS now remembers facts about the Boss, preferences, and session history using the `ACTION:MEM:` protocol.
-- **Predictive Analytics**: The AI anticipates needs by analyzing current interactions and historical data stored in the user profile.
-- **Context-Aware Reasoning**: Using `llama-3.3-70b-versatile`, JARVIS maintains coherent, multi-turn interactions with deep understanding of user intent.
-- **System Integration**: A robust Python-based bridge (`dev_server.py`) enables JARVIS to control local hardware and software systems seamlessly.
+| Mode | Entry point | What works |
+|---|---|---|
+| **Local (full control)** | `python dev_server.py` → serves `aegis_standalone.html` | Everything: chat, wake-word voice, real power control, volume, YouTube search+play, live CPU/RAM/disk vitals. |
+| **Hosted (chat-only)** | `npm run dev` locally, or deployed to Vercel → serves `index.html` | Chat and wake-word voice work standalone (talks to Groq directly, no bridge needed). PC-control panels (vitals, power, media) automatically hide themselves when no bridge is reachable — see **Chat-only mode** below. |
 
-## Quick Start
+## Quick Start (full control, on this PC)
 
-1. **Start the Development Server**:
-   To avoid CORS issues when calling the Groq API from a browser, run the provided local server:
+1. Install Python dependencies once:
+   ```bash
+   pip install -r requirements.txt
+   ```
+2. Start the bridge:
    ```bash
    python dev_server.py
    ```
+3. Open the local network address printed in the terminal (e.g. `http://aegis.local:5001`) — **not** a loopback host, that's blocked by policy. Click **INITIALIZE AEGIS**.
+4. Open **⚙ Settings** (top right), paste a free Groq API key from [console.groq.com](https://console.groq.com), click **Save**.
 
-2. **Access the HUD**:
-   Open your browser and navigate to the local network address provided in the terminal output (e.g., `http://jarvis.local:5001`). 
-   
-   **SECURITY NOTICE**: This system strictly prohibits the use of loopback addresses for connection targets. Always use a proper domain name or local network IP.
+Say *"Aegis, lock my PC"* or click the shield icon to arm hands-free wake-word listening.
 
-3. **Configure API Key**:
-   - Click the **⚙ SETTINGS** button in the top-right corner.
-   - Enter your **Groq API Key** (get one for free at [console.groq.com](https://console.groq.com)).
-   - Click **ACTIVATE LINK**.
+## Chat-only mode (Vercel / phone)
+
+AEGIS is meant to run on your own PC for real PC control — that part can't exist on a hosted platform like Vercel, since there's nothing for it to control there. When no bridge is reachable, the app automatically drops into **chat-only mode**: the Vitals, Media, Power, System Log, and Active Tasks panels hide themselves, leaving just the presence dial, chat, and Quick Launch (which just opens URLs, no PC needed). A note at the bottom of the page confirms you're in this mode.
+
+To deploy the chat-only build to Vercel:
+
+```bash
+npm install
+vercel login      # one-time, opens a browser to authenticate
+vercel --prod
+```
+
+`vercel.json` is already configured (`npm run build` → `dist/`, Vite framework preset). Once deployed, opening the Vercel URL from your phone gives you the chat/voice AI experience anywhere — just open Settings and paste your Groq key on that device too (the key lives in that browser's local storage, not on a server).
+
+If you *do* want your phone to control your PC remotely, the bridge would need to be reachable from the phone — either the same Wi-Fi network (enter your PC's LAN address in Settings → Local Bridge URL), or a public tunnel (e.g. `ngrok http 5001`). That's a real exposure of local system control to the network, so only do it deliberately.
 
 ## Features
 
-- **Ultra-Fast AI**: Powered by `llama-3.3-70b-versatile` via Groq.
-- **Standalone HUD**: No complex backend dependencies.
-- **App Commands**: Launch applications like YouTube, Spotify, and GitHub via voice or text.
-- **Memory Log**: Persistent session history in the HUD.
+- **Real system control**: file management, app launch/close, browser open, and power control (shutdown/restart/sleep have a genuine, cancellable 10-second OS-level delay; lock is instant) — all via `dev_server.py`.
+- **Wake-word voice**: arm the shield toggle for hands-free "Aegis, …" activation; the mic button is push-to-talk.
+- **Spoken replies**: real browser text-to-speech, toggleable.
+- **Music**: `ACTION:MUSIC:<query>` searches YouTube and plays it embedded, with real volume control.
+- **Live vitals**: CPU, memory, and disk usage polled from the bridge every 5 seconds (local mode only).
 
 ## Technical Details
 
-- **Frontend**: HTML5, Tailwind CSS, Three.js (Background), GSAP (Animations).
-- **AI Link**: Direct browser-to-API communication with Groq.
-- **Port**: Runs on `5001` by default.
+- **Frontend**: self-contained HTML/CSS/JS, no framework or CDN dependencies at runtime (custom canvas-drawn presence dial, system fonts only).
+- **AI**: browser calls Groq (`llama-3.3-70b-versatile`) directly — works with or without a bridge.
+- **Bridge**: `dev_server.py`, Python stdlib `http.server` + `psutil`/`pycaw`/`comtypes` (Windows). Port `5001` by default.
+- **Security policy**: loopback addresses are rejected everywhere by design — always use a real hostname or LAN IP.
 
 ---
-*JARVIS online. Standing by, Boss.*
+*AEGIS online. Standing by, Boss.*

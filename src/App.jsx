@@ -11,18 +11,18 @@ import MemoryTimeline from './components/MemoryTimeline';
 import AlertSystem from './components/AlertSystem';
 import ScanLine from './components/ScanLine';
 
-import { useJarvis } from './hooks/useJarvis';
+import { useAegis } from './hooks/useAegis';
 import { useVoice } from './hooks/useVoice';
 import { useSystemStats } from './hooks/useSystemStats';
 import { useMemory } from './hooks/useMemory';
 
 function APIKeyPanel() {
-  const [key, setKey] = React.useState(localStorage.getItem('jarvis_groq_key') || '');
+  const [key, setKey] = React.useState(localStorage.getItem('aegis_groq_key') || '');
   const [saved, setSaved] = React.useState(false);
-  const [show, setShow] = React.useState(!localStorage.getItem('jarvis_groq_key'));
+  const [show, setShow] = React.useState(!localStorage.getItem('aegis_groq_key'));
 
   const save = () => {
-    localStorage.setItem('jarvis_groq_key', key.trim());
+    localStorage.setItem('aegis_groq_key', key.trim());
     setSaved(true);
     setShow(false);
     setTimeout(() => setSaved(false), 2000);
@@ -111,7 +111,7 @@ function App() {
     setAlerts(prev => prev.filter(a => a.id !== id));
   }, []);
 
-  const { isThinking, streamingText, sendMessage } = useJarvis(addMessage);
+  const { isThinking, streamingText, sendMessage } = useAegis(addMessage);
   
   const handleVoiceResult = async (text) => {
     addMessage('user', text);
@@ -149,7 +149,7 @@ function App() {
 
     // Initial greeting
     const greet = () => {
-      const greeting = "JARVIS online. All systems operational. How can I assist you, Sir?";
+      const greeting = "AEGIS online. All systems operational. How can I assist you, Sir?";
       speak(greeting);
       addAlert("System Online", "SUCCESS");
     };
@@ -183,10 +183,10 @@ function App() {
       <header ref={headerRef} className="flex justify-between items-center mb-6">
         <div className="flex flex-col">
           <h1 className="text-3xl font-hud glow-text tracking-widest text-hud-primary">
-            J.A.R.V.I.S.
+            A.E.G.I.S.
           </h1>
           <span className="text-[10px] font-hud opacity-40 tracking-tighter uppercase">
-            Just A Rather Very Intelligent System · v8.0.1
+            Autonomous Electronic Guardian & Intelligence System · v8.0.1
           </span>
         </div>
 
@@ -251,8 +251,8 @@ function App() {
 
       {/* Footer */}
       <footer ref={footerRef} className="mt-6 flex justify-between items-center text-[8px] font-hud opacity-30 tracking-[0.2em] uppercase">
-        <span>&copy; 2026 STARK INDUSTRIES - ALL RIGHTS RESERVED</span>
-        <span>Neural Link: ESTABLISHED | Global Grid: CONNECTED | Protocol: MARK 85</span>
+        <span>&copy; 2026 AEGIS SYSTEMS - ALL RIGHTS RESERVED</span>
+        <span>Neural Link: ESTABLISHED | Global Grid: CONNECTED | Protocol: AEGIS-1</span>
       </footer>
 
       <style>{`

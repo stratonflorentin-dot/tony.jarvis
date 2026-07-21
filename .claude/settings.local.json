@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Stop-Process -Id 12868 -Force)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 5001 -ErrorAction SilentlyContinue)",
+      "Bash(npm run *)",
+      "PowerShell(& \"C:\\\\Program Files \\(x86\\)\\Microsoft\\Edge\\Application\\msedge.exe\" --headless --disable-gpu --no-sandbox --screenshot=\"D:\\\\jarvis\\\\_screenshot_vite.png\" --window-size=1400,900 --virtual-time-budget=5000 \"http://example.test:3000/\" 2>&1)",
+      "Skill(artifact-design)",
+      "Skill(artifact-design:*)",
+      "Bash(awk '/<script>/{flag=1; next} /<\\\\/script>/{flag=0} flag' aegis-nextgen-preview.html)",
+      "Bash(node --check _preview_script.js)",
+      "PowerShell(& \"C:\\\\Program Files \\(x86\\)\\\\Microsoft\\\\Edge\\\\Application\\\\msedge.exe\" --headless --disable-gpu --no-sandbox --screenshot=\"D:\\\\jarvis\\\\_preview_check.png\" --window-size=1400,1000 --virtual-time-budget=8000 \"https://claude.ai/code/artifact/61d81ad3-061c-443c-bd13-58ba235da77d\" 2>&1)",
+      "Bash(awk '/<script type=\"module\">/{flag=1; next} /<\\\\/script>/{flag=0} flag' aegis_standalone.html)",
+      "Bash(node --check /tmp/aegis_standalone.mjs)",
+      "Bash(cp aegis_standalone.html /tmp/_test_dashboard.html)",
+      "Bash(sed -i 's/<div id=\"init-overlay\">/<div id=\"init-overlay\" style=\"display:none\">/' /tmp/_test_dashboard.html)",
+      "Bash(awk '/<script type=\"module\">/{flag=1; next} /<\\\\/script>/{flag=0} flag' index.html)",
+      "Bash(node --check /tmp/index_new.mjs)",
+      "Bash(rm -f /tmp/index_new.mjs)"
+    ]
+  }
+}

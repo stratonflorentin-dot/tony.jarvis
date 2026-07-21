@@ -31,7 +31,7 @@ const ChatPanel = ({ messages, isThinking, streamingText, onSendMessage, isListe
                 : 'bg-hud-primary/5 border-hud-primary/20 text-left'
             }`}>
               <div className="text-[10px] font-hud opacity-40 mb-1 uppercase tracking-widest">
-                {msg.role === 'user' ? 'Sir' : 'JARVIS'}
+                {msg.role === 'user' ? 'Sir' : 'AEGIS'}
               </div>
               <div className="text-sm font-body whitespace-pre-wrap leading-relaxed">
                 {msg.content}
@@ -43,7 +43,7 @@ const ChatPanel = ({ messages, isThinking, streamingText, onSendMessage, isListe
         {isThinking && (
           <div className="flex justify-start">
             <div className="max-w-[80%] p-3 rounded-lg border bg-hud-primary/5 border-hud-primary/20 text-left">
-              <div className="text-[10px] font-hud opacity-40 mb-1 uppercase tracking-widest">JARVIS</div>
+              <div className="text-[10px] font-hud opacity-40 mb-1 uppercase tracking-widest">AEGIS</div>
               <div className="text-sm font-body whitespace-pre-wrap leading-relaxed">
                 {streamingText}
                 <span className="inline-block w-1.5 h-4 bg-hud-primary ml-1 animate-pulse" />

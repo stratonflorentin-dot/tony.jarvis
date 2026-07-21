@@ -1,3 +1,5 @@
+> **Historical record.** This log documents the original build under its former name, "JARVIS," on the date below. The project was subsequently rebranded to **AEGIS**; see `README.md` for current naming. Left unedited to preserve the historical record.
+
 # JARVIS Project Audit Log
 
 ## Project Overview

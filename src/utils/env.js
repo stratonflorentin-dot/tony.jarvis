@@ -12,7 +12,7 @@ export const getBridgeUrl = () => {
   const isVercel = hostname.includes('vercel.app');
                   
   if (!isVercel) {
-    // For local network development, use the current hostname (e.g., jarvis.local or IP)
+    // For local network development, use the current hostname (e.g., aegis.local or IP)
     return `http://${hostname}:5001`;
   }
   

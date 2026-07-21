@@ -2,12 +2,12 @@ import { useState, useEffect } from 'react';
 
 export function useMemory() {
   const [history, setHistory] = useState(() => {
-    const saved = localStorage.getItem('jarvis_history');
+    const saved = localStorage.getItem('aegis_history');
     return saved ? JSON.parse(saved) : [];
   });
 
   const [bossPrefs, setBossPrefs] = useState(() => {
-    const saved = localStorage.getItem('jarvis_boss_prefs');
+    const saved = localStorage.getItem('aegis_boss_prefs');
     return saved ? JSON.parse(saved) : {
       name: 'Boss',
       preferredApps: [],
@@ -18,11 +18,11 @@ export function useMemory() {
   });
 
   useEffect(() => {
-    localStorage.setItem('jarvis_history', JSON.stringify(history.slice(-500)));
+    localStorage.setItem('aegis_history', JSON.stringify(history.slice(-500)));
   }, [history]);
 
   useEffect(() => {
-    localStorage.setItem('jarvis_boss_prefs', JSON.stringify(bossPrefs));
+    localStorage.setItem('aegis_boss_prefs', JSON.stringify(bossPrefs));
   }, [bossPrefs]);
 
   const addMessage = (role, content, tags = []) => {

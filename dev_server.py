@@ -78,6 +78,29 @@ class SystemController:
         except Exception as e:
             return False, str(e)
 
+    def manage_power(self, action):
+        if platform.system() != "Windows":
+            return False, f"Power action '{action}' is only implemented on Windows."
+        try:
+            if action == 'shutdown':
+                subprocess.run(['shutdown', '/s', '/t', '10'], check=True)
+                return True, "Shutting down in 10 seconds. Run 'shutdown /a' to cancel."
+            elif action == 'restart':
+                subprocess.run(['shutdown', '/r', '/t', '10'], check=True)
+                return True, "Restarting in 10 seconds. Run 'shutdown /a' to cancel."
+            elif action == 'sleep':
+                subprocess.run(['rundll32.exe', 'powrprof.dll,SetSuspendState', '0,1,0'], check=True)
+                return True, "Sleeping now."
+            elif action == 'lock':
+                subprocess.run(['rundll32.exe', 'user32.dll,LockWorkStation'], check=True)
+                return True, "Workstation locked."
+            elif action == 'cancel':
+                subprocess.run(['shutdown', '/a'], check=True)
+                return True, "Pending shutdown/restart cancelled."
+            return False, f"Invalid power action: {action}"
+        except Exception as e:
+            return False, str(e)
+
     def manage_app(self, action, app_name):
         try:
             if action == 'launch':
@@ -467,6 +490,9 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
             elif category == 'app':
                 success, msg = system_ctrl.manage_app(action, data.get('app_name'))
                 res = {"success": success, "message": msg}
+            elif category == 'power':
+                success, msg = system_ctrl.manage_power(action)
+                res = {"success": success, "message": msg}
             elif category == 'browser':
                 try:
                     webbrowser.open(data.get('url', 'https://google.com'))
@@ -496,7 +522,7 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == '/':
-            self.path = '/jarvis_standalone.html'
+            self.path = '/aegis_standalone.html'
         return super().do_GET()
 
 def validate_environment():
@@ -526,7 +552,7 @@ if __name__ == "__main__":
     BIND_ADDRESS = "0.0.0.0" # Listen on all interfaces
     
     print("\n" + "="*50)
-    print("   JARVIS NEURAL BRIDGE - CORE INITIALIZATION")
+    print("   AEGIS NEURAL BRIDGE - CORE INITIALIZATION")
     print("="*50)
     print(f"HUD_PATH: {DIRECTORY}")
     print(f"PORT:     {PORT}")

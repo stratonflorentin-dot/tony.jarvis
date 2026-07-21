@@ -20,7 +20,7 @@ const VoiceEngine = ({ isListening, isSpeaking }) => {
         let height = 0;
         
         if (isSpeaking) {
-          // JARVIS speaking waveform (gold/orange)
+          // AEGIS speaking waveform (gold/orange)
           height = Math.sin(time * 10 + i * 0.2) * 20 + 25;
           ctx.fillStyle = 'var(--hud-gold)';
           ctx.shadowBlur = 10;

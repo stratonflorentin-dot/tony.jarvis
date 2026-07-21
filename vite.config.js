@@ -10,7 +10,7 @@ export default defineConfig(({ mode }) => {
     throw new Error(`\n\n[SECURITY FATAL] Prohibited bridge target detected: ${bridgeTarget}\nLoopback addresses are strictly forbidden by system policy.\n\n`);
   }
 
-  const networkHostname = process.env.COMPUTERNAME || 'jarvis';
+  const networkHostname = process.env.COMPUTERNAME || 'aegis';
   const finalTarget = bridgeTarget || `http://${networkHostname}.local:5001`;
 
   return {

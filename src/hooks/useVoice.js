@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react';
-import { JARVIS_INTRO_PHRASES } from '../utils/jarvisPersonality';
+import { AEGIS_INTRO_PHRASES } from '../utils/aegisPersonality';
 
 export function useVoice({ onResult, onError }) {
   const [isListening, setIsListening] = useState(false);
@@ -61,7 +61,7 @@ export function useVoice({ onResult, onError }) {
 
     const utterance = new SpeechSynthesisUtterance(text);
     
-    // JARVIS Voice Settings
+    // AEGIS Voice Settings
     utterance.rate = options.rate || 0.9;
     utterance.pitch = options.pitch || 0.85;
     utterance.volume = options.volume || 1.0;
@@ -84,7 +84,7 @@ export function useVoice({ onResult, onError }) {
   }, []);
 
   const getRandomIntro = () => {
-    return JARVIS_INTRO_PHRASES[Math.floor(Math.random() * JARVIS_INTRO_PHRASES.length)];
+    return AEGIS_INTRO_PHRASES[Math.floor(Math.random() * AEGIS_INTRO_PHRASES.length)];
   };
 
   return { 

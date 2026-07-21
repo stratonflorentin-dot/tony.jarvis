@@ -1,8 +1,8 @@
 import { useState, useCallback } from 'react';
 import { routeCommand } from '../utils/commandRouter';
 
-async function askJarvis(userMessage, conversationHistory = []) {
-  const API_KEY = localStorage.getItem('jarvis_groq_key') || '';
+async function askAegis(userMessage, conversationHistory = []) {
+  const API_KEY = localStorage.getItem('aegis_groq_key') || '';
 
   if (!API_KEY) {
     return "Boss, I need a Groq API key to activate my neural link. Please enter it in the settings panel — top right corner.";
@@ -22,7 +22,7 @@ async function askJarvis(userMessage, conversationHistory = []) {
         messages: [
           {
             role: 'system',
-            content: `You are JARVIS, Tony Stark's legendary AI assistant. You are brilliant, calm, precise, and have dry British wit. You are deeply loyal to your user — always call them "Boss". 
+            content: `You are AEGIS, a legendary AI assistant. You are brilliant, calm, precise, and have dry British wit. You are deeply loyal to your user — always call them "Boss".
 
 RULES:
 - Always address the user as "Boss"
@@ -62,7 +62,7 @@ You can help with: coding, writing, math, research, planning, analysis, file man
   }
 }
 
-export function useJarvis(addMessageToHistory) {
+export function useAegis(addMessageToHistory) {
   const [isThinking, setIsThinking] = useState(false);
   const [streamingText, setStreamingText] = useState('');
 
@@ -76,7 +76,7 @@ export function useJarvis(addMessageToHistory) {
         content: m.content
       }));
       
-      const rawResponse = await askJarvis(userText, messages);
+      const rawResponse = await askAegis(userText, messages);
       
       // Route commands if any
       const routed = routeCommand(rawResponse);
@@ -88,7 +88,7 @@ export function useJarvis(addMessageToHistory) {
       return routed;
 
     } catch (error) {
-      console.error('JARVIS API Error:', error);
+      console.error('AEGIS API Error:', error);
       setIsThinking(false);
       return { verbalResponse: "I'm sorry, Boss. My neural links are experiencing some interference. I couldn't process that request." };
     }

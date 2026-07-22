@@ -38,3 +38,8 @@ build/
 
 # Test files
 test*.py
+test*.cjs
+test*.js
+test_bridge_file.txt
+.env.development
+start_bridge.bat

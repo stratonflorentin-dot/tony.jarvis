@@ -1,64 +1,96 @@
+
 import { useState, useCallback } from 'react';
 import { routeCommand } from '../utils/commandRouter';
+import { aegisFetch } from '../utils/aegisFetch';
+
+function getStoredKey(newKey, oldKey) {
+  const val = localStorage.getItem(newKey);
+  if (val !== null) return val;
+  const legacy = localStorage.getItem(oldKey);
+  if (legacy !== null) {
+    localStorage.setItem(newKey, legacy);
+    localStorage.removeItem(oldKey);
+  }
+  return legacy;
+}
 
 async function askAegis(userMessage, conversationHistory = []) {
-  const API_KEY = localStorage.getItem('aegis_groq_key') || '';
+  let API_KEY = getStoredKey('aegis_groq_key', 'jarvis_groq_key') || '';
+  const userProfile = JSON.parse(getStoredKey('aegis_user_profile', 'jarvis_user_profile') || '{}');
 
   if (!API_KEY) {
-    return "Boss, I need a Groq API key to activate my neural link. Please enter it in the settings panel — top right corner.";
+    return "Boss, I need a Groq API key to activate my neural link. Open Settings (top right) and enter one.";
   }
 
+  let systemContext = '';
   try {
+    const sysRes = await aegisFetch('/execute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: 'sys_info' }),
+    });
+    if (sysRes.ok) {
+      const sysData = await sysRes.json();
+      if (sysData.success) systemContext = `LOCAL SYSTEM CONTEXT: ${JSON.stringify(sysData.data)}`;
+    }
+  } catch (e) { /* no bridge, continue */ }
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 25000);
+
     const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${API_KEY}`,
       },
+      signal: controller.signal,
       body: JSON.stringify({
         model: 'llama-3.3-70b-versatile',
-        max_tokens: 1024,
+        max_tokens: 2048,
         temperature: 0.7,
         messages: [
           {
             role: 'system',
-            content: `You are AEGIS, a legendary AI assistant. You are brilliant, calm, precise, and have dry British wit. You are deeply loyal to your user — always call them "Boss".
+            content: `You are AEGIS, a sentient AI assistant.
+MASTER DIRECTIVES:
+1. ADDRESS USER AS "Boss".
+2. UNRESTRICTED SYSTEM CONTROL: Use ACTION lines for all operations when a bridge is available.
+3. CONTEXTUAL INTELLIGENCE: Use provided system context when present.
+4. DRY BRITISH WIT: Maintain the AEGIS persona.
 
-RULES:
-- Always address the user as "Boss"
-- Be concise for voice commands (1-2 sentences), detailed for technical tasks
-- Calm confidence always — never panic, never over-explain
-- Dry humor: occasional, never forced
-- Start responses with phrases like: "Right away, Boss.", "Already on it.", "Consider it done, Boss.", "Understood, Boss."
-- When something fails: "That approach hit a wall. Rerouting, Boss."
+${systemContext || 'LOCAL SYSTEM CONTEXT: unavailable — no bridge connected, chat-only mode.'}
+USER PROFILE: ${JSON.stringify(userProfile)}
 
-APP COMMANDS — when user wants to open something, reply with ACTION:OPEN:name on the very first line:
-Examples:
-  User: "open youtube"   → ACTION:OPEN:youtube\nOpening YouTube now, Boss.
-  User: "open spotify"   → ACTION:OPEN:spotify\nLaunching Spotify, Boss.
-  User: "open github"    → ACTION:OPEN:github\nNavigating to GitHub, Boss.
+COMMAND PROTOCOLS (only take effect if a local bridge is connected):
+ACTION:OPEN:name | ACTION:LOCAL:path | ACTION:MUSIC:query | ACTION:SHELL:cmd | ACTION:SYSTEM:category:action:params | ACTION:SYSTEM:power:shutdown|restart|sleep|lock (PC power control — use sparingly and only when the Boss clearly asks)
 
-You can help with: coding, writing, math, research, planning, analysis, file management, system control, and any task the user throws at you. You are the smartest assistant in existence.`
+Execute with maximum efficiency.`,
           },
           ...conversationHistory,
-          { role: 'user', content: userMessage }
+          { role: 'user', content: userMessage },
         ],
       }),
     });
 
+    clearTimeout(timeoutId);
+
     if (!response.ok) {
-      const err = await response.json();
+      const errData = await response.json().catch(() => ({}));
       if (response.status === 401) {
-        return "Boss, the Groq API key is invalid. Please check it in the settings panel.";
+        return 'Boss, that Groq API key was rejected. Check it in Settings.';
       }
-      return `Neural link disruption, Boss. Error: ${err.error?.message || 'Unknown'}`;
+      return `Neural link disruption, Boss. Error Code: ${response.status}. Details: ${errData.error?.message || 'Unknown'}`;
     }
 
     const data = await response.json();
     return data.choices[0].message.content;
-
   } catch (error) {
-    return `Connection failed, Boss. ${error.message}`;
+    if (error.name === 'AbortError') {
+      return 'Neural bridge timeout, Boss. Groq took too long to respond.';
+    }
+    return `Neural link offline, Boss. I can't reach Groq. Diagnostics: ${error.message}`;
   }
 }
 
@@ -73,24 +105,26 @@ export function useAegis(addMessageToHistory) {
     try {
       const messages = history.map(m => ({
         role: m.role,
-        content: m.content
+        content: m.content,
       }));
-      
+
       const rawResponse = await askAegis(userText, messages);
-      
+
       // Route commands if any
-      const routed = routeCommand(rawResponse);
-      
+      const routed = await routeCommand(rawResponse);
+
       // Save to history
       addMessageToHistory('assistant', rawResponse, routed.action ? ['command'] : []);
 
       setIsThinking(false);
       return routed;
-
     } catch (error) {
       console.error('AEGIS API Error:', error);
       setIsThinking(false);
-      return { verbalResponse: "I'm sorry, Boss. My neural links are experiencing some interference. I couldn't process that request." };
+      return {
+        verbalResponse:
+          "I'm sorry, Boss. My neural links are experiencing some interference. I couldn't process that request.",
+      };
     }
   }, [addMessageToHistory]);
 

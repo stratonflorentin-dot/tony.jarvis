@@ -35,3 +35,6 @@ build/
 
 # Claude settings
 .claude/settings.local.json
+
+# Test files
+test*.py

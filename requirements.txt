@@ -8,6 +8,14 @@ mss
 pyperclip
 pygetwindow; sys_platform == "win32"
 
+# Weather uses wttr.in directly (no package needed). Brightness control and OCR:
+screen_brightness_control
+pytesseract
+# pytesseract is just a Python wrapper — it also needs the Tesseract OCR *engine* installed
+# separately (it's not on PyPI). Windows: https://github.com/UB-Mannheim/tesseract/wiki,
+# then make sure tesseract.exe is on PATH. Without it, the ocr tool fails gracefully with
+# install instructions rather than breaking anything else.
+
 # pygame is optional (local audio file playback only — not used by any
 # current voice/text command, which uses YouTube search+embed instead).
 # Skipped by default: it has no prebuilt wheel yet for newer Python

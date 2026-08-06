@@ -273,4 +273,54 @@ export const TOOL_SCHEMAS = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'get_weather',
+      description: 'Get current weather conditions for a location (temperature, condition, humidity, wind). Requires a local bridge.',
+      parameters: {
+        type: 'object',
+        properties: { location: { type: 'string', description: 'City name, e.g. "London" or "San Francisco, CA".' } },
+        required: ['location'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search_files',
+      description: "Search for files by name (or glob pattern) under a directory on the Boss's PC. Requires a local bridge.",
+      parameters: {
+        type: 'object',
+        properties: {
+          pattern: { type: 'string', description: 'A name fragment (e.g. "invoice") or a glob pattern (e.g. "*.pdf").' },
+          base_dir: { type: 'string', description: 'Directory to search under. Defaults to the home directory.' },
+        },
+        required: ['pattern'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'brightness_control',
+      description: "Get or set the screen brightness on the Boss's PC. Requires a local bridge and a display that supports software brightness control.",
+      parameters: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['get', 'set'] },
+          level: { type: 'integer', description: 'Brightness 0-100. Required when action is "set".' },
+        },
+        required: ['action'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'read_screen_text',
+      description: "Capture the Boss's screen and extract any visible text via OCR — useful for reading dialogs, code, or documents on screen without needing a vision-capable model. Requires a local bridge with Tesseract OCR installed.",
+      parameters: { type: 'object', properties: {} },
+    },
+  },
 ];

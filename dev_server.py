@@ -60,8 +60,21 @@ try:
 except ImportError:
     HAS_PYGETWINDOW = False
 
+try:
+    import screen_brightness_control as sbc
+    HAS_BRIGHTNESS = True
+except ImportError:
+    HAS_BRIGHTNESS = False
+
+try:
+    import pytesseract
+    HAS_PYTESSERACT = True
+except ImportError:
+    HAS_PYTESSERACT = False
+
 import base64
 import io
+import fnmatch
 
 PORT = 5001
 DIRECTORY = os.path.dirname(os.path.abspath(__file__))
@@ -106,6 +119,30 @@ class SystemController:
             return False, "Invalid file action"
         except Exception as e:
             return False, str(e)
+
+    def search_files(self, pattern, base_dir=None, max_results=50):
+        base_dir = base_dir or os.path.expanduser("~")
+        if not pattern:
+            return False, "pattern is required", []
+        if not os.path.isdir(base_dir):
+            return False, f"'{base_dir}' is not a directory", []
+        # Forgiving matching: a bare name like "invoice" becomes "*invoice*" so callers
+        # don't need to know glob syntax; explicit globs (e.g. "*.pdf") pass through untouched.
+        if '*' not in pattern and '?' not in pattern:
+            pattern = f"*{pattern}*"
+        matches = []
+        try:
+            for root, dirs, files in os.walk(base_dir):
+                # Skip common noise directories so a home-directory search doesn't churn forever.
+                dirs[:] = [d for d in dirs if d not in ('node_modules', '.git', '__pycache__', 'dist', 'build')]
+                for name in files:
+                    if fnmatch.fnmatch(name.lower(), pattern.lower()):
+                        matches.append(os.path.join(root, name))
+                        if len(matches) >= max_results:
+                            return True, f"Found {len(matches)} match(es) (capped)", matches
+            return True, f"Found {len(matches)} match(es)", matches
+        except Exception as e:
+            return False, str(e), matches
 
     def manage_power(self, action):
         if platform.system() != "Windows":
@@ -330,12 +367,41 @@ class WebController:
 
 web_ctrl = WebController()
 
+class WeatherController:
+    def get(self, location):
+        if not location:
+            return False, "location is required", None
+        try:
+            url = f"https://wttr.in/{urllib.parse.quote(location)}?format=j1"
+            req = urllib.request.Request(url, headers={'User-Agent': WebController.USER_AGENT})
+            with urllib.request.urlopen(req, timeout=15) as response:
+                data = json.loads(response.read().decode('utf-8', errors='ignore'))
+            current = data['current_condition'][0]
+            area = data.get('nearest_area', [{}])[0]
+            place = ', '.join(filter(None, [
+                area.get('areaName', [{}])[0].get('value'),
+                area.get('country', [{}])[0].get('value'),
+            ])) or location
+            summary = {
+                'location': place,
+                'temperature_c': current.get('temp_C'),
+                'feels_like_c': current.get('FeelsLikeC'),
+                'condition': current.get('weatherDesc', [{}])[0].get('value'),
+                'humidity_percent': current.get('humidity'),
+                'wind_kmph': current.get('windspeedKmph'),
+            }
+            return True, "OK", summary
+        except Exception as e:
+            return False, str(e), None
+
+weather_ctrl = WeatherController()
+
 class AutomationController:
     def screenshot(self):
         if not HAS_MSS:
             return False, "mss not installed (pip install -r requirements.txt)", None
         try:
-            with mss.mss() as sct:
+            with mss.MSS() as sct:
                 monitor = sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0]
                 shot = sct.grab(monitor)
                 png_bytes = mss.tools.to_png(shot.rgb, shot.size)
@@ -384,6 +450,43 @@ class AutomationController:
             return True, f"{action} -> {win.title}"
         except Exception as e:
             return False, str(e)
+
+    def brightness(self, action, level=None):
+        if not HAS_BRIGHTNESS:
+            return False, "screen_brightness_control not installed (pip install -r requirements.txt)", None
+        try:
+            if action == 'get':
+                return True, "OK", sbc.get_brightness()
+            if action == 'set':
+                if level is None:
+                    return False, "level (0-100) is required", None
+                sbc.set_brightness(max(0, min(100, int(level))))
+                return True, f"Brightness set to {level}%", None
+            return False, f"Invalid brightness action: {action}", None
+        except Exception as e:
+            return False, str(e), None
+
+    def ocr(self, image_base64=None):
+        if not HAS_PYTESSERACT:
+            return False, "pytesseract not installed (pip install -r requirements.txt)", None
+        try:
+            from PIL import Image
+            if image_base64 is None:
+                success, message, shot = self.screenshot()
+                if not success:
+                    return False, message, None
+                image_base64 = shot['image_base64']
+            img = Image.open(io.BytesIO(base64.b64decode(image_base64)))
+            text = pytesseract.image_to_string(img)
+            return True, "OK", text.strip()
+        except pytesseract.TesseractNotFoundError:
+            return False, (
+                "The Tesseract OCR engine isn't installed on this PC (pytesseract is just a Python "
+                "wrapper for it). Install it from https://github.com/UB-Mannheim/tesseract/wiki "
+                "(Windows) and make sure it's on PATH, then try again."
+            ), None
+        except Exception as e:
+            return False, str(e), None
 
 automation_ctrl = AutomationController()
 
@@ -541,6 +644,21 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
+        try:
+            self._handle_post()
+        except Exception as e:
+            print(f"[ERROR] Unhandled exception in do_POST ({self.path}): {e}")
+            traceback.print_exc()
+            try:
+                self.send_response(400)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": False, "error": {"message": f"Malformed request: {e}"}}).encode())
+            except Exception:
+                pass  # connection already broken/headers already sent — nothing more to do
+
+    def _handle_post(self):
         # Normalize path by removing trailing slashes
         path = self.path.rstrip('/')
         if not path.startswith('/'):
@@ -911,6 +1029,58 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
             else:
                 res = {"success": False, "message": f"Invalid reminders action: {action}"}
 
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps(res).encode())
+
+        elif path == '/weather':
+            content_length = int(self.headers['Content-Length'])
+            data = json.loads(self.rfile.read(content_length))
+            location = data.get('location', '')
+            print(f"[WEATHER] Location: {location}")
+            success, message, weather = weather_ctrl.get(location)
+            res = {"success": success, "message": message, "weather": weather}
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps(res).encode())
+
+        elif path == '/file_search':
+            content_length = int(self.headers['Content-Length'])
+            data = json.loads(self.rfile.read(content_length))
+            pattern = data.get('pattern', '')
+            base_dir = data.get('base_dir')
+            print(f"[FILE] Searching for: {pattern} in {base_dir or '~'}")
+            success, message, matches = system_ctrl.search_files(pattern, base_dir)
+            res = {"success": success, "message": message, "matches": matches}
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps(res).encode())
+
+        elif path == '/brightness':
+            content_length = int(self.headers['Content-Length'])
+            data = json.loads(self.rfile.read(content_length))
+            action = data.get('action', 'get')
+            print(f"[AUTOMATION] Brightness: {action}")
+            success, message, level = automation_ctrl.brightness(action, data.get('level'))
+            res = {"success": success, "message": message, "level": level}
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps(res).encode())
+
+        elif path == '/ocr':
+            content_length = int(self.headers['Content-Length'])
+            data = json.loads(self.rfile.read(content_length))
+            print("[AUTOMATION] OCR requested")
+            success, message, text = automation_ctrl.ocr(data.get('image_base64'))
+            res = {"success": success, "message": message, "text": text}
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')

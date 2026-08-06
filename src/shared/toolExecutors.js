@@ -187,5 +187,31 @@ export function createToolExecutors(ctx) {
       logTerminal(`reminder:set -> ${data.success ? 'SUCCESS' : 'FAILED'}`);
       return data;
     },
+
+    async get_weather({ location }) {
+      return postJSON('/weather', { location });
+    },
+
+    async search_files({ pattern, base_dir }) {
+      return withTask('FILE:SEARCH', async () => {
+        const data = await postJSON('/file_search', { pattern, base_dir });
+        logTerminal(`file_search -> ${data.success ? `${(data.matches || []).length} match(es)` : 'FAILED'}`);
+        return data;
+      });
+    },
+
+    async brightness_control({ action, level }) {
+      const data = await postJSON('/brightness', { action, level });
+      logTerminal(`brightness:${action} -> ${data.success ? 'SUCCESS' : 'FAILED'}`);
+      return data;
+    },
+
+    async read_screen_text() {
+      return withTask('OCR', async () => {
+        const data = await postJSON('/ocr', {});
+        logTerminal(`ocr -> ${data.success ? 'SUCCESS' : 'FAILED'}`);
+        return data;
+      });
+    },
   };
 }

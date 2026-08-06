@@ -1098,6 +1098,16 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/':
             self.path = '/aegis_standalone.html'
+        else:
+            # Vite copies public/* to the dist root at build time, so root-relative refs
+            # like /manifest.json, /sw.js, /aegis-icon.svg resolve on the hosted build.
+            # This plain static server doesn't do that rewrite, so mirror it here: fall
+            # back to public/<path> for anything not found directly under DIRECTORY.
+            requested = os.path.join(DIRECTORY, self.path.lstrip('/'))
+            if not os.path.isfile(requested):
+                public_path = os.path.join(DIRECTORY, 'public', self.path.lstrip('/'))
+                if os.path.isfile(public_path):
+                    self.path = '/public' + self.path
         return super().do_GET()
 
 def validate_environment():

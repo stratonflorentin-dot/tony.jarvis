@@ -22,6 +22,19 @@ const ROTATE_SPEED = 5;
 // Smoothing factor for grab-point tracking (0..1, higher = snappier)
 const SMOOTHING = 0.4;
 
+// GPU delegate creation can *hang* rather than reject on some setups (observed under
+// software/headless rendering) — the original try/catch fallback to CPU only fires on a
+// thrown error, so a hang would leave the Boss stuck on "INITIALIZING…" forever. Race it
+// against a timeout so a slow/stuck GPU path always still resolves to a working tracker.
+const GPU_DELEGATE_TIMEOUT_MS = 8000;
+
+function withTimeout(promise, ms, label) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)),
+  ]);
+}
+
 export class HandTracker {
   video;
   overlay;
@@ -46,14 +59,18 @@ export class HandTracker {
   }
 
   async start() {
+    console.log("HandTracker: requesting camera…");
     this.stream = await navigator.mediaDevices.getUserMedia({
       video: { width: 640, height: 480, facingMode: "user" },
       audio: false,
     });
+    console.log("HandTracker: camera stream acquired");
     this.video.srcObject = this.stream;
     await this.video.play();
+    console.log("HandTracker: video playing, loading MediaPipe fileset…");
 
     const fileset = await FilesetResolver.forVisionTasks(WASM_CDN);
+    console.log("HandTracker: fileset resolved, creating landmarker…");
     const options = {
       baseOptions: { modelAssetPath: MODEL_URL, delegate: "GPU" },
       runningMode: "VIDEO",
@@ -63,17 +80,30 @@ export class HandTracker {
       minTrackingConfidence: 0.6,
     };
     try {
-      this.landmarker = await HandLandmarker.createFromOptions(fileset, options);
-    } catch {
-      // Some browsers/GPUs reject the GPU delegate — fall back to CPU
-      this.landmarker = await HandLandmarker.createFromOptions(fileset, {
-        ...options,
-        baseOptions: { ...options.baseOptions, delegate: "CPU" },
-      });
+      this.landmarker = await withTimeout(
+        HandLandmarker.createFromOptions(fileset, options),
+        GPU_DELEGATE_TIMEOUT_MS,
+        "GPU delegate init",
+      );
+      console.log("HandTracker: landmarker ready (GPU delegate)");
+    } catch (e) {
+      // Some browsers/GPUs reject the GPU delegate outright, or it hangs instead of
+      // rejecting (the timeout above catches that case) — either way, fall back to CPU.
+      console.warn("HandTracker: GPU delegate unavailable or slow, falling back to CPU —", e.message);
+      this.landmarker = await withTimeout(
+        HandLandmarker.createFromOptions(fileset, {
+          ...options,
+          baseOptions: { ...options.baseOptions, delegate: "CPU" },
+        }),
+        GPU_DELEGATE_TIMEOUT_MS,
+        "CPU delegate init",
+      );
+      console.log("HandTracker: landmarker ready (CPU delegate)");
     }
 
     this.running = true;
     this.loop();
+    console.log("HandTracker: detection loop started");
   }
 
   stop() {

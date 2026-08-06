@@ -1,9 +1,16 @@
 // Bridge-authoritative categorized memory (identity, preferences, projects, relationships,
-// notes) via dev_server.py's /memory route. Falls back to a flat localStorage object when
-// no bridge is reachable (e.g. hosted/chat-only mode), so remember/recall always "succeed"
-// from the model's point of view — bridge-authoritative when reachable, per-browser-local
-// otherwise.
+// notes) via dev_server.py's /memory route. When no bridge is reachable (e.g. hosted/
+// chat-only mode), falls through to Supabase if configured (syncs across devices via a
+// shared sync code — see supabaseClient.js and supabase/schema.sql for the security
+// tradeoff that implies), and finally to a flat localStorage object as the last resort.
+// remember/recall always "succeed" from the model's point of view at whichever tier answers.
 import { postJSON } from './bridgeClient.js';
+import {
+  rememberFactSupabase,
+  recallFactsSupabase,
+  forgetFactSupabase,
+  summaryFactsSupabase,
+} from './supabaseClient.js';
 
 const FALLBACK_KEY = 'aegis_memory_fallback';
 
@@ -24,7 +31,13 @@ export async function remember(category, key, value) {
     const data = await postJSON('/memory', { action: 'remember', category, key, value });
     if (data.success) return data;
   } catch (e) {
-    /* no bridge reachable — fall through to local */
+    /* no bridge reachable — fall through to Supabase, then local */
+  }
+  try {
+    const data = await rememberFactSupabase(category, key, value);
+    if (data) return data;
+  } catch (e) {
+    console.warn('Supabase remember failed, falling back to local:', e.message);
   }
   const store = readFallback();
   const cat = category || 'notes';
@@ -39,7 +52,13 @@ export async function recall(category, query) {
     const data = await postJSON('/memory', { action: 'recall', category, query });
     if (data.success) return data;
   } catch (e) {
-    /* no bridge reachable — fall through to local */
+    /* no bridge reachable — fall through to Supabase, then local */
+  }
+  try {
+    const data = await recallFactsSupabase(category, query);
+    if (data) return data;
+  } catch (e) {
+    console.warn('Supabase recall failed, falling back to local:', e.message);
   }
   const store = readFallback();
   const facts = [];
@@ -59,7 +78,13 @@ export async function forget(category, key) {
     const data = await postJSON('/memory', { action: 'forget', category, key });
     if (data.success) return data;
   } catch (e) {
-    /* no bridge reachable — fall through to local */
+    /* no bridge reachable — fall through to Supabase, then local */
+  }
+  try {
+    const data = await forgetFactSupabase(category, key);
+    if (data) return data;
+  } catch (e) {
+    console.warn('Supabase forget failed, falling back to local:', e.message);
   }
   const store = readFallback();
   if (store[category]) delete store[category][key];
@@ -72,7 +97,13 @@ export async function summary(limit = 15) {
     const data = await postJSON('/memory', { action: 'summary' });
     if (data.success) return data.summary || '';
   } catch (e) {
-    /* no bridge reachable — fall through to local */
+    /* no bridge reachable — fall through to Supabase, then local */
+  }
+  try {
+    const text = await summaryFactsSupabase(limit);
+    if (text !== null) return text;
+  } catch (e) {
+    console.warn('Supabase summary failed, falling back to local:', e.message);
   }
   const store = readFallback();
   const parts = [];

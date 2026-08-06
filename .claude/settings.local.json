@@ -17,7 +17,13 @@
       "Bash(awk '/<script type=\"module\">/{flag=1; next} /<\\\\/script>/{flag=0} flag' index.html)",
       "Bash(node --check /tmp/index_new.mjs)",
       "Bash(rm -f /tmp/index_new.mjs)",
-      "Bash(python3 -c ' *)"
+      "Bash(python3 -c ' *)",
+      "Bash(npx --yes esbuild /c/Users/hp/AppData/Local/Temp/claude/d--jarvis/67320faa-beb5-447a-a1d9-6c1a9d8d19cd/scratchpad/orbScene.ts --format=esm --target=es2020 --outfile=/c/Users/hp/AppData/Local/Temp/claude/d--jarvis/67320faa-beb5-447a-a1d9-6c1a9d8d19cd/scratchpad/orbScene.js)",
+      "Bash(npx --yes esbuild /c/Users/hp/AppData/Local/Temp/claude/d--jarvis/67320faa-beb5-447a-a1d9-6c1a9d8d19cd/scratchpad/handTracker.ts --format=esm --target=es2020 --outfile=/c/Users/hp/AppData/Local/Temp/claude/d--jarvis/67320faa-beb5-447a-a1d9-6c1a9d8d19cd/scratchpad/handTracker.js)",
+      "Bash(npm install *)",
+      "Bash(node -e ' *)",
+      "Bash(git fetch *)",
+      "Bash(git rev-list *)"
     ]
   }
 }

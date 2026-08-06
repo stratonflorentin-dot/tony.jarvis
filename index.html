@@ -12,6 +12,18 @@
     <link rel="icon" href="/aegis-icon.svg" type="image/svg+xml">
     <link rel="manifest" href="/manifest.json">
     <script src="https://www.youtube.com/iframe_api"></script>
+    <!-- Resolves bare "three"/"@mediapipe/tasks-vision" specifiers for this file when served
+         directly by dev_server.py (no bundler). The Vite/hosted build (index.html via `npm
+         run build`) ignores this and bundles the same packages from node_modules instead. -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
+            "@mediapipe/tasks-vision": "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/vision_bundle.mjs"
+        }
+    }
+    </script>
     <style>
         :root {
             --ground: #16130f;
@@ -159,14 +171,19 @@
         .launch-tile:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
         .launch-tile.is-active { color: var(--ground); background: var(--signal); border-color: var(--signal); transform: translateY(-1px); }
 
-        /* ---------- Presence dial ---------- */
-        .presence-panel .panel-body { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 22px 15px 18px; }
-        .dial-wrap { position: relative; width: 208px; height: 208px; }
-        .dial-wrap canvas { width: 100%; height: 100%; display: block; }
-        .dial-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; gap: 3px; }
-        .dial-mode { font-family: var(--face-display); font-size: 0.76rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink); }
-        .dial-sub { font-family: var(--face-mono); font-size: 0.56rem; color: var(--ink-faint); }
-        .presence-controls { display: flex; align-items: center; gap: 10px; }
+        /* ---------- Presence orb (3D, replaces the old 2D canvas dial) ---------- */
+        .presence-panel .panel-body { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 18px 15px; }
+        .orb-wrap { position: relative; width: 100%; height: 340px; border-radius: var(--radius); overflow: hidden; background: radial-gradient(ellipse at center, rgba(215,164,78,0.06), var(--ground-2)); }
+        .orb-wrap canvas:first-child { display: block; width: 100%; height: 100%; }
+        .orb-hud { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); text-align: center; pointer-events: none; display: flex; flex-direction: column; gap: 2px; z-index: 2; }
+        .dial-mode { font-family: var(--face-display); font-size: 0.76rem; font-weight: 600; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink); text-shadow: 0 0 10px rgba(0,0,0,0.85); }
+        .dial-sub { font-family: var(--face-mono); font-size: 0.56rem; color: var(--ink-faint); text-shadow: 0 0 10px rgba(0,0,0,0.85); }
+        .gesture-panel { position: absolute; bottom: 10px; right: 10px; width: 132px; border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line-soft); background: #000; z-index: 2; }
+        .gesture-panel.hidden { display: none; }
+        .gesture-panel video { width: 100%; display: block; transform: scaleX(-1); }
+        .gesture-panel canvas { position: absolute; inset: 0; width: 100%; height: 100%; transform: scaleX(-1); }
+        .gesture-status { position: absolute; bottom: 0; left: 0; right: 0; padding: 3px 6px; font-family: var(--face-mono); font-size: 0.5rem; letter-spacing: 0.04em; text-transform: uppercase; background: rgba(0,0,0,0.65); color: var(--signal); text-align: center; }
+        .presence-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: center; }
         .round-btn { width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel-raised); color: var(--ink-dim); cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all .15s; }
         .round-btn svg { width: 18px; height: 18px; stroke: currentColor; fill: none; }
         .round-btn:hover { color: var(--ink); border-color: var(--signal-dim); }
@@ -287,6 +304,15 @@
         <b>Mixed Content:</b> hosted HTTPS pages can't reach an HTTP bridge. Use the local HUD below, or tunnel with ngrok.
         <a id="local-hud-link" href="http://localhost:5001" target="_blank" rel="noopener noreferrer">Use Local HUD</a>
     </div>
+    <p class="field-label" style="margin-top:14px;">Supabase URL (optional — syncs memory when no bridge)</p>
+    <input type="text" id="supabase-url-input" class="field-input" placeholder="https://xxxx.supabase.co">
+    <p class="field-label" style="margin-top:10px;">Supabase Anon Key</p>
+    <input type="password" id="supabase-anon-key-input" class="field-input" placeholder="eyJ...">
+    <p class="field-label" style="margin-top:10px;">Sync Code</p>
+    <input type="text" id="sync-code-input" class="field-input" placeholder="auto-generated">
+    <div class="settings-note">
+        <b>Not private:</b> anyone with this code plus your Supabase URL/anon key can read or write that data — it's an unlisted-link model, not a password. Copy this code into Settings on another device to share memory with it.
+    </div>
 </div>
 
 <div class="console">
@@ -351,9 +377,13 @@
         <div class="col-center">
             <section class="panel presence-panel">
                 <div class="panel-body">
-                    <div class="dial-wrap">
-                        <canvas id="dial" width="208" height="208"></canvas>
-                        <div class="dial-center"><span class="dial-mode" id="dial-mode">Standby</span><span class="dial-sub" id="dial-sub">awaiting command</span></div>
+                    <div class="orb-wrap" id="orb-wrap">
+                        <div class="orb-hud"><span class="dial-mode" id="dial-mode">Standby</span><span class="dial-sub" id="dial-sub">awaiting command</span></div>
+                        <div class="gesture-panel hidden" id="gesture-panel">
+                            <video id="gesture-video" muted playsinline></video>
+                            <canvas id="gesture-overlay" width="208" height="156"></canvas>
+                            <div class="gesture-status" id="gesture-status">SHOW HANDS</div>
+                        </div>
                     </div>
                     <div class="presence-controls">
                         <button class="arm-btn" id="wake-toggle-btn" type="button">
@@ -362,6 +392,10 @@
                         </button>
                         <button class="round-btn mic" id="mic-btn" type="button" title="Push to talk">
                             <svg viewBox="0 0 24 24" stroke-width="1.8"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3"/></svg>
+                        </button>
+                        <button class="arm-btn" id="gesture-toggle-btn" type="button" title="Hand-gesture orb control (webcam)">
+                            <svg viewBox="0 0 24 24" stroke-width="1.8"><path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0"/><path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2"/><path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-4.53a2 2 0 0 1 3.13-2.5L8 15"/></svg>
+                            Gestures
                         </button>
                     </div>
                 </div>
@@ -454,6 +488,9 @@
     import { speak as speakGroqOrBrowser, cancelSpeech } from '/src/shared/tts.js';
     import { startRecording, stopRecording, transcribeWithGroq } from '/src/shared/voice.js';
     import { summary as getMemorySummary } from '/src/shared/memoryClient.js';
+    import { getSyncCode, setSyncCode, syncMessage, fetchRecentMessages } from '/src/shared/supabaseClient.js';
+    import { createOrbScene } from '/src/shared/orbScene.js';
+    import { HandTracker } from '/src/shared/handTracker.js';
 
     // --- YouTube API ---
     let ytPlayer;
@@ -538,16 +575,9 @@
         uptimeVal.textContent = fmtDuration(Date.now() - bootTime);
     }, 1000);
 
-    /* ---------------- Presence dial ---------------- */
-    const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const canvas = document.getElementById('dial');
-    const dctx = canvas.getContext('2d');
+    /* ---------------- Presence orb (3D) ---------------- */
     const dialMode = document.getElementById('dial-mode');
     const dialSub = document.getElementById('dial-sub');
-    let dpr = Math.max(1, window.devicePixelRatio || 1);
-    function resizeCanvas() { const r = canvas.getBoundingClientRect(); canvas.width = r.width * dpr; canvas.height = r.height * dpr; }
-    resizeCanvas();
-    window.addEventListener('resize', resizeCanvas);
 
     const presence = { armed: false, pushListening: false, hearingSpeech: false, thinking: false, speaking: false };
     const MODE_TEXT = {
@@ -572,50 +602,65 @@
     }
     renderPresence();
 
-    const colors = { signal: '#d7a44e', live: '#5fc9c2', ink: 'rgba(241,231,210,0.55)', inkFaint: 'rgba(241,231,210,0.18)' };
-    function drawDial(t) {
-        const size = canvas.width, cx = size / 2, cy = size / 2, r = size * 0.40;
-        dctx.clearRect(0, 0, size, size);
-        dctx.strokeStyle = 'rgba(241,231,210,0.14)'; dctx.lineWidth = size * 0.006;
-        dctx.beginPath(); dctx.arc(cx, cy, r, 0, Math.PI * 2); dctx.stroke();
-        for (let i = 0; i < 60; i++) {
-            const a = (i / 60) * Math.PI * 2, major = i % 5 === 0, r1 = r - (major ? size * 0.045 : size * 0.024);
-            dctx.beginPath(); dctx.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1); dctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
-            dctx.strokeStyle = major ? colors.ink : colors.inkFaint; dctx.lineWidth = major ? size * 0.005 : size * 0.0028; dctx.stroke();
-        }
-        const activeColor = (currentMode === 'listening') ? colors.live : colors.signal;
-        if (currentMode === 'thinking') {
-            const segs = 8;
-            for (let i = 0; i < segs; i++) {
-                const a0 = (i / segs) * Math.PI * 2 + t * 0.003, phase = (t * 0.003 + i / segs) % 1;
-                dctx.beginPath(); dctx.arc(cx, cy, r * 0.82, a0, a0 + (Math.PI * 2 / segs) * 0.6);
-                dctx.strokeStyle = colors.signal; dctx.globalAlpha = 0.25 + 0.65 * Math.pow(Math.sin(phase * Math.PI), 2);
-                dctx.lineWidth = size * 0.02; dctx.lineCap = 'round'; dctx.stroke();
-            }
-            dctx.globalAlpha = 1;
-        } else if (currentMode === 'speaking') {
-            const bars = 40;
-            for (let i = 0; i < bars; i++) {
-                const a = (i / bars) * Math.PI * 2;
-                const amp = (Math.sin(t * 0.006 + i * 0.6) * 0.5 + 0.5) * (Math.sin(t * 0.011 + i) * 0.3 + 0.7);
-                const len = size * 0.05 * (0.3 + amp), r1 = r * 0.7, r2 = r1 + len;
-                dctx.beginPath(); dctx.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1); dctx.lineTo(cx + Math.cos(a) * r2, cy + Math.sin(a) * r2);
-                dctx.strokeStyle = colors.signal; dctx.globalAlpha = 0.5 + amp * 0.5; dctx.lineWidth = size * 0.008; dctx.lineCap = 'round'; dctx.stroke();
-            }
-            dctx.globalAlpha = 1;
-        } else {
-            const speed = currentMode === 'listening' ? 0.0022 : 0.0007;
-            const angle = reduceMotion ? -Math.PI / 2 : (t * speed) % (Math.PI * 2);
-            dctx.beginPath(); dctx.arc(cx, cy, r * 0.88, angle, angle + Math.PI * 0.55);
-            dctx.strokeStyle = activeColor; dctx.globalAlpha = 0.55; dctx.lineWidth = size * 0.012; dctx.lineCap = 'round'; dctx.stroke();
-            dctx.globalAlpha = 1;
-            const pulse = reduceMotion ? 0.5 : (Math.sin(t * 0.0015) * 0.5 + 0.5);
-            dctx.beginPath(); dctx.arc(cx, cy, size * (0.05 + pulse * 0.01), 0, Math.PI * 2);
-            dctx.fillStyle = activeColor; dctx.globalAlpha = 0.35 + pulse * 0.35; dctx.fill(); dctx.globalAlpha = 1;
+    // Ambient, self-animating 3D orb (rotation/pulse/particles all driven internally by
+    // orbScene.js) — presence state still surfaces via the dial-mode/dial-sub text overlay.
+    const orbWrap = document.getElementById('orb-wrap');
+    const orbScene = createOrbScene(orbWrap);
+
+    /* ---------------- Hand-gesture orb control (optional, webcam) ---------------- */
+    const gestureToggleBtn = document.getElementById('gesture-toggle-btn');
+    const gesturePanel = document.getElementById('gesture-panel');
+    const gestureVideo = document.getElementById('gesture-video');
+    const gestureOverlay = document.getElementById('gesture-overlay');
+    const gestureStatus = document.getElementById('gesture-status');
+    let handTracker = null;
+
+    async function startGestures() {
+        if (handTracker) return;
+        gesturePanel.classList.remove('hidden');
+        gestureStatus.textContent = 'INITIALIZING…';
+        const tracker = new HandTracker(gestureVideo, gestureOverlay, {
+            onRotate: (dt, dp) => orbScene.rotateBy(dt, dp),
+            onZoom: (factor) => orbScene.zoomBy(factor),
+            onStatus: (status) => {
+                gestureStatus.textContent = status.hands > 0
+                    ? `${status.hands} HAND${status.hands > 1 ? 'S' : ''} · ${status.mode.toUpperCase()}`
+                    : 'SHOW HANDS';
+            },
+        });
+        handTracker = tracker;
+        try {
+            await tracker.start();
+            gestureToggleBtn.classList.add('is-armed');
+        } catch (e) {
+            handTracker = null;
+            gesturePanel.classList.add('hidden');
+            gestureToggleBtn.classList.remove('is-armed');
+            addMessage('system', e.name === 'NotAllowedError' ? 'Camera access denied — gestures need webcam permission.' : 'Gesture tracking failed to initialize.', { system: true });
         }
     }
-    function loop(t) { drawDial(t); requestAnimationFrame(loop); }
-    requestAnimationFrame(loop);
+
+    function stopGestures() {
+        handTracker?.stop();
+        handTracker = null;
+        gesturePanel.classList.add('hidden');
+        gestureToggleBtn.classList.remove('is-armed');
+    }
+
+    gestureToggleBtn.onclick = () => { if (handTracker) stopGestures(); else startGestures(); };
+
+    // Keyboard shortcuts from the source project (+/- zoom, R reset, G gestures) — ignored
+    // while typing in the composer or settings fields so they don't hijack normal text entry.
+    window.addEventListener('keydown', (e) => {
+        const tag = (e.target && e.target.tagName) || '';
+        if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+        switch (e.key) {
+            case '+': case '=': orbScene.zoomIn(); break;
+            case '-': case '_': orbScene.zoomOut(); break;
+            case 'r': case 'R': orbScene.resetView(); break;
+            case 'g': case 'G': gestureToggleBtn.click(); break;
+        }
+    });
 
     /* ---------------- Log ---------------- */
     const chatMessages = document.getElementById('chat-messages');
@@ -636,7 +681,7 @@
         chatMessages.appendChild(el);
         chatMessages.scrollTop = chatMessages.scrollHeight;
         entryCount++; logCount.textContent = entryCount + ' entries';
-        if (!isUser && !opts.system) speak(text);
+        if (!isUser && !opts.system && !opts.skipSpeak) speak(text);
         return el;
     }
     function addTyping() {
@@ -793,6 +838,7 @@
         }
 
         addMessage('Boss', val);
+        syncMessage('user', val).catch(() => {});
         chatInput.value = '';
         presence.thinking = true; renderPresence();
         const typingEl = addTyping();
@@ -800,7 +846,10 @@
         function finish(text) {
             typingEl.remove(); entryCount--;
             presence.thinking = false; renderPresence();
-            if (text) addMessage('Aegis', text);
+            if (text) {
+                addMessage('Aegis', text);
+                syncMessage('assistant', text).catch(() => {});
+            }
         }
 
         const API_KEY = getStoredKey('aegis_groq_key', 'jarvis_groq_key') || '';
@@ -995,9 +1044,17 @@
     setInterval(pollReminders, 30000);
 
     /* ---------------- Init / settings ---------------- */
-    window.initializeSystems = () => {
+    window.initializeSystems = async () => {
         document.getElementById('init-overlay').style.display = 'none';
         if (window.speechSynthesis) window.speechSynthesis.speak(new SpeechSynthesisUtterance(''));
+
+        try {
+            const history = await fetchRecentMessages();
+            for (const m of history) {
+                addMessage(m.role === 'user' ? 'Boss' : 'Aegis', m.content, { skipSpeak: true });
+            }
+        } catch (e) { /* Supabase unavailable/unconfigured — no history to replay */ }
+
         addMessage('Aegis', 'Neural links initialized. Instrument systems operational. All systems nominal, Boss. How can I assist you today?');
         updateLinkUI(getStoredKey('aegis_groq_key', 'jarvis_groq_key') ? 'CONNECTED' : 'DISCONNECTED');
     };
@@ -1016,6 +1073,9 @@
         document.getElementById('bridge-url-input').placeholder = config.BRIDGE_URL;
         document.getElementById('bridge-url-hint').textContent = `Active Link: ${config.BRIDGE_URL}`;
         document.getElementById('local-hud-link').href = config.BRIDGE_URL;
+        document.getElementById('supabase-url-input').value = localStorage.getItem('aegis_supabase_url') || '';
+        document.getElementById('supabase-anon-key-input').value = localStorage.getItem('aegis_supabase_anon_key') || '';
+        document.getElementById('sync-code-input').value = getSyncCode();
     };
 
     window.testBridgeConnection = async () => {
@@ -1036,6 +1096,14 @@
         const bridgeUrl = document.getElementById('bridge-url-input').value.trim();
         if (key) localStorage.setItem('aegis_groq_key', key);
         if (bridgeUrl) localStorage.setItem('aegis_bridge_url', bridgeUrl); else localStorage.removeItem('aegis_bridge_url');
+
+        const supabaseUrl = document.getElementById('supabase-url-input').value.trim();
+        const supabaseAnonKey = document.getElementById('supabase-anon-key-input').value.trim();
+        const syncCode = document.getElementById('sync-code-input').value.trim();
+        if (supabaseUrl) localStorage.setItem('aegis_supabase_url', supabaseUrl); else localStorage.removeItem('aegis_supabase_url');
+        if (supabaseAnonKey) localStorage.setItem('aegis_supabase_anon_key', supabaseAnonKey); else localStorage.removeItem('aegis_supabase_anon_key');
+        setSyncCode(syncCode);
+
         updateLinkUI(key ? 'CONNECTED' : 'DISCONNECTED');
         window.toggleSettings();
         addMessage('Aegis', 'Neural link configuration updated, Boss. Systems recalibrated.');

@@ -2,6 +2,12 @@ psutil
 pycaw; sys_platform == "win32"
 comtypes; sys_platform == "win32"
 
+# Web tools (search, page fetch) and light desktop automation (screenshot, clipboard, window control)
+beautifulsoup4
+mss
+pyperclip
+pygetwindow; sys_platform == "win32"
+
 # pygame is optional (local audio file playback only — not used by any
 # current voice/text command, which uses YouTube search+embed instead).
 # Skipped by default: it has no prebuilt wheel yet for newer Python

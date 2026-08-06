@@ -8,6 +8,7 @@ import subprocess
 import platform
 import threading
 import time
+import sqlite3
 import urllib.request
 import urllib.error
 import urllib.parse
@@ -33,6 +34,34 @@ try:
     HAS_PYGAME = True
 except ImportError:
     HAS_PYGAME = False
+
+# Optional imports for web tools and light desktop automation
+try:
+    from bs4 import BeautifulSoup
+    HAS_BS4 = True
+except ImportError:
+    HAS_BS4 = False
+
+try:
+    import mss
+    HAS_MSS = True
+except ImportError:
+    HAS_MSS = False
+
+try:
+    import pyperclip
+    HAS_PYPERCLIP = True
+except ImportError:
+    HAS_PYPERCLIP = False
+
+try:
+    import pygetwindow as gw
+    HAS_PYGETWINDOW = True
+except ImportError:
+    HAS_PYGETWINDOW = False
+
+import base64
+import io
 
 PORT = 5001
 DIRECTORY = os.path.dirname(os.path.abspath(__file__))
@@ -238,6 +267,263 @@ class MediaController:
         return False
 
 media_ctrl = MediaController()
+
+class WebController:
+    USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+
+    def search(self, query, max_results=5):
+        if not HAS_BS4:
+            return False, "beautifulsoup4 not installed (pip install -r requirements.txt)", []
+        try:
+            data = urllib.parse.urlencode({'q': query}).encode('utf-8')
+            req = urllib.request.Request(
+                'https://html.duckduckgo.com/html/',
+                data=data,
+                headers={
+                    'User-Agent': self.USER_AGENT,
+                    'Accept-Language': 'en-US,en;q=0.9',
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                method='POST',
+            )
+            with urllib.request.urlopen(req, timeout=15) as response:
+                html = response.read().decode('utf-8', errors='ignore')
+
+            soup = BeautifulSoup(html, 'html.parser')
+            links = soup.select('a.result__a')
+            if not links:
+                # DuckDuckGo occasionally serves a bot-detection challenge page instead of results.
+                return False, "Search returned no results (DuckDuckGo may be rate-limiting this connection).", []
+
+            results = []
+            for a in links[:max_results]:
+                title = a.get_text(strip=True)
+                url = a.get('href', '')
+                snippet_el = a.find_parent('div', class_='result__body')
+                snippet = ''
+                if snippet_el:
+                    snippet_a = snippet_el.select_one('a.result__snippet')
+                    if snippet_a:
+                        snippet = snippet_a.get_text(strip=True)
+                if title and url:
+                    results.append({'title': title, 'url': url, 'snippet': snippet})
+            return True, f"Found {len(results)} results", results
+        except Exception as e:
+            return False, str(e), []
+
+    def fetch(self, url, max_chars=8000):
+        if not HAS_BS4:
+            return False, "beautifulsoup4 not installed (pip install -r requirements.txt)", None
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': self.USER_AGENT})
+            with urllib.request.urlopen(req, timeout=15) as response:
+                html = response.read().decode('utf-8', errors='ignore')
+
+            soup = BeautifulSoup(html, 'html.parser')
+            for tag in soup(['script', 'style', 'nav', 'header', 'footer', 'noscript']):
+                tag.decompose()
+            title = soup.title.get_text(strip=True) if soup.title else ''
+            text = re.sub(r'\n{3,}', '\n\n', soup.get_text('\n', strip=True))
+            return True, "OK", {'title': title, 'text': text[:max_chars]}
+        except Exception as e:
+            return False, str(e), None
+
+web_ctrl = WebController()
+
+class AutomationController:
+    def screenshot(self):
+        if not HAS_MSS:
+            return False, "mss not installed (pip install -r requirements.txt)", None
+        try:
+            with mss.mss() as sct:
+                monitor = sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0]
+                shot = sct.grab(monitor)
+                png_bytes = mss.tools.to_png(shot.rgb, shot.size)
+                b64 = base64.b64encode(png_bytes).decode('ascii')
+                return True, "Captured", {'image_base64': b64, 'width': shot.size[0], 'height': shot.size[1]}
+        except Exception as e:
+            return False, str(e), None
+
+    def clipboard_read(self):
+        if not HAS_PYPERCLIP:
+            return False, "pyperclip not installed (pip install -r requirements.txt)", None
+        try:
+            return True, "OK", pyperclip.paste()
+        except Exception as e:
+            return False, str(e), None
+
+    def clipboard_write(self, text):
+        if not HAS_PYPERCLIP:
+            return False, "pyperclip not installed (pip install -r requirements.txt)", None
+        try:
+            pyperclip.copy(text or '')
+            return True, "Copied to clipboard", None
+        except Exception as e:
+            return False, str(e), None
+
+    def window(self, action, title):
+        if not HAS_PYGETWINDOW:
+            return False, "pygetwindow not installed (pip install -r requirements.txt)"
+        try:
+            if action == 'list':
+                return True, [w.title for w in gw.getAllWindows() if w.title.strip()]
+            matches = gw.getWindowsWithTitle(title) if title else []
+            if not matches:
+                return False, f"No window found matching '{title}'"
+            win = matches[0]
+            if action == 'focus':
+                win.activate()
+            elif action == 'minimize':
+                win.minimize()
+            elif action == 'maximize':
+                win.maximize()
+            elif action == 'close':
+                win.close()
+            else:
+                return False, f"Invalid window action: {action}"
+            return True, f"{action} -> {win.title}"
+        except Exception as e:
+            return False, str(e)
+
+automation_ctrl = AutomationController()
+
+MEMORY_DB_PATH = os.path.join(DIRECTORY, 'tony_memory.db')
+
+class MemoryManager:
+    """Bridge-authoritative categorized memory: identity, preferences, projects,
+    relationships, notes. Reuses tony_memory.db's existing (previously unwired) `facts`
+    table so memory persists across restarts and is shared by any device that connects
+    to this bridge, not just one browser's localStorage."""
+
+    def __init__(self, db_path):
+        self.db_path = db_path
+        self._init_schema()
+
+    def _connect(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _init_schema(self):
+        conn = self._connect()
+        try:
+            conn.execute('''CREATE TABLE IF NOT EXISTS facts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                category TEXT,
+                key TEXT NOT NULL,
+                value TEXT NOT NULL,
+                confidence REAL DEFAULT 1.0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )''')
+            # Re-remembering the same (category, key) updates in place instead of duplicating rows.
+            conn.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_facts_cat_key ON facts(category, key)')
+            conn.commit()
+        finally:
+            conn.close()
+
+    def remember(self, category, key, value):
+        if not key or value is None or value == '':
+            return False, "Both key and value are required"
+        conn = self._connect()
+        try:
+            conn.execute('''
+                INSERT INTO facts (category, key, value, updated_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(category, key) DO UPDATE SET value=excluded.value, updated_at=CURRENT_TIMESTAMP
+            ''', (category or 'notes', key, str(value)))
+            conn.commit()
+            return True, f"Remembered {category or 'notes'}:{key}"
+        except Exception as e:
+            return False, str(e)
+        finally:
+            conn.close()
+
+    def recall(self, category=None, query=None, limit=50):
+        conn = self._connect()
+        try:
+            sql = 'SELECT category, key, value, updated_at FROM facts WHERE 1=1'
+            params = []
+            if category:
+                sql += ' AND category = ?'
+                params.append(category)
+            if query:
+                sql += ' AND (key LIKE ? OR value LIKE ?)'
+                like = f'%{query}%'
+                params.extend([like, like])
+            sql += ' ORDER BY updated_at DESC LIMIT ?'
+            params.append(limit)
+            rows = conn.execute(sql, params).fetchall()
+            return True, [dict(r) for r in rows]
+        except Exception as e:
+            return False, str(e)
+        finally:
+            conn.close()
+
+    def forget(self, category, key):
+        conn = self._connect()
+        try:
+            cur = conn.execute('DELETE FROM facts WHERE category = ? AND key = ?', (category, key))
+            conn.commit()
+            return True, f"Deleted {cur.rowcount} fact(s)"
+        except Exception as e:
+            return False, str(e)
+        finally:
+            conn.close()
+
+    def summary(self, limit=15):
+        success, rows = self.recall(limit=limit)
+        if not success or not rows:
+            return ""
+        return "; ".join(f"[{r['category']}] {r['key']}: {r['value']}" for r in rows)
+
+memory_mgr = MemoryManager(MEMORY_DB_PATH)
+
+class ReminderManager:
+    """One-shot proactive reminders, reusing tony_memory.db's existing (previously unwired)
+    `reminders` table. The frontend polls /reminders {action:'check'} periodically; due
+    reminders are returned once and marked inactive so they don't repeat."""
+
+    def __init__(self, db_path):
+        self.db_path = db_path
+
+    def _connect(self):
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def add(self, message, reminder_time):
+        if not message or not reminder_time:
+            return False, "Both message and when (ISO datetime) are required"
+        conn = self._connect()
+        try:
+            conn.execute(
+                'INSERT INTO reminders (message, reminder_time, is_active) VALUES (?, ?, 1)',
+                (message, reminder_time),
+            )
+            conn.commit()
+            return True, f"Reminder set for {reminder_time}"
+        except Exception as e:
+            return False, str(e)
+        finally:
+            conn.close()
+
+    def due(self):
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT id, message, reminder_time FROM reminders WHERE is_active = 1 AND reminder_time <= ? ORDER BY reminder_time",
+                (datetime.now().isoformat(),),
+            ).fetchall()
+            if rows:
+                ids = [r['id'] for r in rows]
+                conn.execute(f"UPDATE reminders SET is_active = 0 WHERE id IN ({','.join('?' * len(ids))})", ids)
+                conn.commit()
+            return [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+reminder_mgr = ReminderManager(MEMORY_DB_PATH)
 
 class MyHandler(http.server.SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
@@ -505,7 +791,126 @@ class MyHandler(http.server.SimpleHTTPRequestHandler):
                 res = {"success": success, "message": msg}
             
             system_ctrl.log_task(f"{category}:{action}", "COMPLETED" if res["success"] else "FAILED", res.get("message") or res.get("error"))
-            
+
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps(res).encode())
+
+        elif path == '/web_search':
+            content_length = int(self.headers['Content-Length'])
+            data = json.loads(self.rfile.read(content_length))
+            query = data.get('query', '')
+            print(f"[WEB] Searching: {query}")
+            success, message, results = web_ctrl.search(query)
+            res = {"success": success, "message": message, "results": results}
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps(res).encode())
+
+        elif path == '/fetch_url':
+            content_length = int(self.headers['Content-Length'])
+            data = json.loads(self.rfile.read(content_length))
+            url = data.get('url', '')
+            print(f"[WEB] Fetching: {url}")
+            success, message, page = web_ctrl.fetch(url)
+            res = {"success": success, "message": message, "page": page}
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps(res).encode())
+
+        elif path == '/screenshot':
+            print("[AUTOMATION] Capturing screenshot")
+            success, message, shot = automation_ctrl.screenshot()
+            res = {"success": success, "message": message, **(shot or {})}
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps(res).encode())
+
+        elif path == '/clipboard':
+            content_length = int(self.headers['Content-Length'])
+            data = json.loads(self.rfile.read(content_length))
+            action = data.get('action', 'read')
+            print(f"[AUTOMATION] Clipboard: {action}")
+            if action == 'write':
+                success, message, _ = automation_ctrl.clipboard_write(data.get('text', ''))
+                res = {"success": success, "message": message}
+            else:
+                success, message, text = automation_ctrl.clipboard_read()
+                res = {"success": success, "message": message, "text": text}
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps(res).encode())
+
+        elif path == '/window':
+            content_length = int(self.headers['Content-Length'])
+            data = json.loads(self.rfile.read(content_length))
+            action = data.get('action', 'list')
+            title = data.get('title', '')
+            print(f"[AUTOMATION] Window: {action} '{title}'")
+            success, result = automation_ctrl.window(action, title)
+            res = {"success": success}
+            if action == 'list':
+                res["windows"] = result if success else []
+                if not success:
+                    res["message"] = result
+            else:
+                res["message"] = result
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps(res).encode())
+
+        elif path == '/memory':
+            content_length = int(self.headers['Content-Length'])
+            data = json.loads(self.rfile.read(content_length))
+            action = data.get('action', 'recall')
+            print(f"[MEMORY] Action: {action}")
+
+            if action == 'remember':
+                success, message = memory_mgr.remember(data.get('category'), data.get('key'), data.get('value'))
+                res = {"success": success, "message": message}
+            elif action == 'recall':
+                success, result = memory_mgr.recall(data.get('category'), data.get('query'))
+                res = {"success": success, "facts": result if success else [], "message": None if success else result}
+            elif action == 'forget':
+                success, message = memory_mgr.forget(data.get('category'), data.get('key'))
+                res = {"success": success, "message": message}
+            elif action == 'summary':
+                res = {"success": True, "summary": memory_mgr.summary()}
+            else:
+                res = {"success": False, "message": f"Invalid memory action: {action}"}
+
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            self.wfile.write(json.dumps(res).encode())
+
+        elif path == '/reminders':
+            content_length = int(self.headers['Content-Length'])
+            data = json.loads(self.rfile.read(content_length))
+            action = data.get('action', 'check')
+
+            if action == 'set':
+                success, message = reminder_mgr.add(data.get('message'), data.get('when'))
+                res = {"success": success, "message": message}
+            elif action == 'check':
+                due = reminder_mgr.due()
+                res = {"success": True, "due": due}
+            else:
+                res = {"success": False, "message": f"Invalid reminders action: {action}"}
+
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')

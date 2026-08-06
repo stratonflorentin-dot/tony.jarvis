@@ -440,28 +440,20 @@
 </div>
 
 <script type="module">
-    // --- localStorage migration: transparently move old jarvis_* keys to aegis_* ---
-    function getStoredKey(newKey, oldKey) {
-        const val = localStorage.getItem(newKey);
-        if (val !== null) return val;
-        const legacy = localStorage.getItem(oldKey);
-        if (legacy !== null) {
-            localStorage.setItem(newKey, legacy);
-            localStorage.removeItem(oldKey);
-        }
-        return legacy;
-    }
-
-    // --- App links used by ACTION:OPEN and Quick Launch ---
-    const APP_URLS = {
-        youtube: 'https://youtube.com', spotify: 'https://open.spotify.com', github: 'https://github.com',
-        gmail: 'https://mail.google.com', google: 'https://google.com', chatgpt: 'https://chat.openai.com',
-        netflix: 'https://netflix.com', twitter: 'https://x.com', reddit: 'https://reddit.com',
-        notion: 'https://notion.so', whatsapp: 'https://web.whatsapp.com', figma: 'https://figma.com',
-        discord: 'https://discord.com/app', slack: 'https://app.slack.com', zoom: 'https://zoom.us',
-        linkedin: 'https://linkedin.com', drive: 'https://drive.google.com', docs: 'https://docs.google.com',
-        sheets: 'https://sheets.google.com', maps: 'https://maps.google.com', wikipedia: 'https://wikipedia.org'
-    };
+    // Loopback policy (see PROJECT_AUDIT.md/README "Security policy"): the isLocalhost/
+    // validateUrl guard that rejects localhost/127.0.0.1 as a configured bridge URL lives in
+    // src/shared/bridgeClient.js and applies here via getEnvConfig/aegisFetch/postJSON below.
+    // The one "localhost" reference still in this file's markup (Settings panel's "Use Local
+    // HUD" link) is a same-machine convenience shortcut, not a configured bridge default.
+    import { getStoredKey, getEnvConfig, postJSON } from '/src/shared/bridgeClient.js';
+    import { APP_URLS } from '/src/shared/appUrls.js';
+    import { buildSystemPrompt } from '/src/shared/systemPrompt.js';
+    import { TOOL_SCHEMAS } from '/src/shared/toolSchemas.js';
+    import { createToolExecutors } from '/src/shared/toolExecutors.js';
+    import { runAgentLoop } from '/src/shared/groqAgent.js';
+    import { speak as speakGroqOrBrowser, cancelSpeech } from '/src/shared/tts.js';
+    import { startRecording, stopRecording, transcribeWithGroq } from '/src/shared/voice.js';
+    import { summary as getMemorySummary } from '/src/shared/memoryClient.js';
 
     // --- YouTube API ---
     let ytPlayer;
@@ -478,217 +470,60 @@
         });
     };
 
-    // --- CONFIGURATION ---
-    const isLocalhost = (host) => ['localhost', '127.0.0.1', '[::1]', '::1'].some(f => host.toLowerCase().includes(f));
-
-    const validateUrl = (url) => {
-        if (!url) return true;
-        const parsed = new URL(url.startsWith('http') ? url : `http://${url}`);
-        if (isLocalhost(parsed.hostname)) throw new Error(`SECURITY POLICY VIOLATION: '${parsed.hostname}' is a prohibited loopback target.`);
-        return true;
-    };
-
-    const getEnvConfig = () => {
-        const hostname = window.location.hostname;
-        const storedBridge = getStoredKey('aegis_bridge_url', 'jarvis_bridge_url');
-        if (storedBridge) {
-            try { validateUrl(storedBridge); } catch (e) { console.error(e.message); localStorage.removeItem('aegis_bridge_url'); }
-        }
-        const defaultBridge = window.location.origin;
-        return {
-            BRIDGE_URL: getStoredKey('aegis_bridge_url', 'jarvis_bridge_url') || defaultBridge,
-            IS_LOCAL: hostname !== 'aegis-hud-example.vercel.app'
-        };
-    };
-
-    // --- AEGIS AI ENGINE (Groq) ---
-    async function aegisFetch(path, options) {
-        const config = getEnvConfig();
-        let bridgeReached = false, lastError = null;
-        try { validateUrl(config.BRIDGE_URL); } catch (e) { throw new Error(`Neural link offline: ${e.message}`); }
-
+    // --- Music search, shared between the manual Quick Launch flow and the play_music tool ---
+    async function onMusicSearch(query) {
+        document.getElementById('track-title').textContent = 'Searching…';
+        document.getElementById('track-artist').textContent = query;
+        logTerminal(`SEARCHING ARCHIVES: ${query}`);
         try {
-            const response = await fetch(path, options);
-            if (response.ok) return response;
-            if (response.status === 404) bridgeReached = true;
-            if (response.status !== 404 && response.status !== 0) return response;
-        } catch (e) { lastError = e; }
-
-        try {
-            const localUrl = `${config.BRIDGE_URL.replace(/\/$/, '')}${path.startsWith('/') ? '' : '/'}${path}`;
-            const res = await fetch(localUrl, options);
-            if (res.ok) return res;
-            if (res.status === 404) bridgeReached = true;
-            if (res.status !== 0) return res;
-        } catch (e) { lastError = e; }
-
-        if (bridgeReached) { const err = new Error(`Interface route '${path}' not found on any bridge.`); err.status = 404; throw err; }
-        const errorMsg = lastError ? lastError.message : "Connection refused or blocked by browser security.";
-        const offlineErr = new Error(`Neural link offline: ${errorMsg}`);
-        offlineErr.status = 0;
-        throw offlineErr;
-    }
-
-    async function askAegis(userMessage, conversationHistory = []) {
-        let API_KEY = getStoredKey('aegis_groq_key', 'jarvis_groq_key') || '';
-        const userProfile = JSON.parse(getStoredKey('aegis_user_profile', 'jarvis_user_profile') || '{}');
-        if (!API_KEY) return "Boss, I need a Groq API key to activate my neural link. Open Settings (top right) and enter one.";
-
-        // Local system context is optional — only available when a bridge is reachable.
-        // Chat itself talks to Groq directly, so it works standalone (e.g. hosted on Vercel, or from your phone).
-        let systemContext = "";
-        try {
-            const sysRes = await aegisFetch('/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: 'sys_info' }) });
-            if (sysRes.ok) { const sysData = await sysRes.json(); if (sysData.success) systemContext = `LOCAL SYSTEM CONTEXT: ${JSON.stringify(sysData.data)}`; }
-        } catch (e) { /* no bridge reachable — chat still works, just without local system context */ }
-
-        try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 25000);
-
-            const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${API_KEY}` },
-                signal: controller.signal,
-                body: JSON.stringify({
-                    model: 'llama-3.3-70b-versatile', max_tokens: 2048, temperature: 0.7,
-                    messages: [
-                        { role: 'system', content: `You are AEGIS, a sentient AI assistant.
-MASTER DIRECTIVES:
-1. ADDRESS USER AS "Boss".
-2. UNRESTRICTED SYSTEM CONTROL: Use ACTION lines for all operations when a bridge is available.
-3. CONTEXTUAL INTELLIGENCE: Use provided system context when present.
-4. DRY BRITISH WIT: Maintain the AEGIS persona.
-
-${systemContext || 'LOCAL SYSTEM CONTEXT: unavailable — no bridge connected, chat-only mode.'}
-USER PROFILE: ${JSON.stringify(userProfile)}
-
-COMMAND PROTOCOLS (only take effect if a local bridge is connected):
-ACTION:OPEN:name | ACTION:LOCAL:path | ACTION:MUSIC:query | ACTION:SHELL:cmd | ACTION:SYSTEM:category:action:params | ACTION:SYSTEM:power:shutdown|restart|sleep|lock (PC power control — use sparingly and only when the Boss clearly asks)
-
-Execute with maximum efficiency.` },
-                        ...conversationHistory,
-                        { role: 'user', content: userMessage }
-                    ]
-                })
-            });
-            clearTimeout(timeoutId);
-
-            if (!response.ok) {
-                const errData = await response.json().catch(() => ({}));
-                if (response.status === 401) return "Boss, that Groq API key was rejected. Check it in Settings.";
-                return `Neural link disruption, Boss. Error Code: ${response.status}. Details: ${errData.error?.message || 'Unknown'}`;
+            const data = await postJSON('/search_music', { query });
+            if (data.success && data.videoId) {
+                document.getElementById('video-container').classList.remove('hidden');
+                if (ytPlayer && ytPlayer.loadVideoById) { ytPlayer.loadVideoById(data.videoId); ytPlayer.playVideo(); }
+                else document.getElementById('youtube-player').src = `https://www.youtube.com/embed/${data.videoId}?autoplay=1&enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}&rel=0&playsinline=1`;
+                document.getElementById('track-title').textContent = query;
+                document.getElementById('track-artist').textContent = 'Streaming from archives';
+                isPlaying = true;
+                document.getElementById('play-icon').innerHTML = '<path d="M7 5h3v14H7zM14 5h3v14h-3z"/>';
+                logTerminal(`MUSIC_LINK: ESTABLISHED [ID: ${data.videoId}]`);
+                return { success: true, videoId: data.videoId };
             }
-            const data = await response.json();
-            return data.choices[0].message.content;
-        } catch (error) {
-            if (error.name === 'AbortError') return "Neural bridge timeout, Boss. Groq took too long to respond.";
-            return `Neural link offline, Boss. I can't reach Groq. Diagnostics: ${error.message}`;
+            logTerminal('MUSIC_LINK: FAILED [no match]');
+            return { success: false, message: 'No match found.' };
+        } catch (e) {
+            logTerminal('MUSIC_LINK: CRITICAL ERROR');
+            return { success: false, message: e.message };
         }
     }
 
-    async function processAegisResponse(rawResponse) {
-        const lines = rawResponse.split('\n');
-        let verbalResponse = [];
-
-        for (let line of lines) {
-            const actionLine = line.trim();
-
-            if (actionLine.startsWith('ACTION:OPEN:')) {
-                const appName = actionLine.replace('ACTION:OPEN:', '').toLowerCase().trim();
-                const url = APP_URLS[appName];
-                if (url) window.open(url, '_blank');
-                continue;
-            }
-
-            if (actionLine.startsWith('ACTION:LOCAL:')) {
-                const localCmd = actionLine.replace('ACTION:LOCAL:', '').trim();
-                try { await aegisFetch('/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: localCmd }) }); }
-                catch (e) { console.error('Local execution failed:', e); }
-                continue;
-            }
-
-            if (actionLine.startsWith('ACTION:MUSIC:')) {
-                const query = actionLine.replace('ACTION:MUSIC:', '').trim();
-                document.getElementById('track-title').textContent = 'Searching…';
-                document.getElementById('track-artist').textContent = query;
-                logTerminal(`SEARCHING ARCHIVES: ${query}`);
-                try {
-                    const res = await aegisFetch('/search_music', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query }) });
-                    if (res.ok) {
-                        const data = await res.json();
-                        if (data.success && data.videoId) {
-                            document.getElementById('video-container').classList.remove('hidden');
-                            if (ytPlayer && ytPlayer.loadVideoById) { ytPlayer.loadVideoById(data.videoId); ytPlayer.playVideo(); }
-                            else document.getElementById('youtube-player').src = `https://www.youtube.com/embed/${data.videoId}?autoplay=1&enablejsapi=1&origin=${encodeURIComponent(window.location.origin)}&rel=0&playsinline=1`;
-                            document.getElementById('track-title').textContent = query;
-                            document.getElementById('track-artist').textContent = 'Streaming from archives';
-                            isPlaying = true;
-                            document.getElementById('play-icon').innerHTML = '<path d="M7 5h3v14H7zM14 5h3v14h-3z"/>';
-                            logTerminal(`MUSIC_LINK: ESTABLISHED [ID: ${data.videoId}]`);
-                        } else logTerminal('MUSIC_LINK: FAILED [no match]');
-                    } else logTerminal(`MUSIC_LINK: FAILED [HTTP ${res.status}]`);
-                } catch (e) { logTerminal('MUSIC_LINK: CRITICAL ERROR'); }
-                continue;
-            }
-
-            if (actionLine.startsWith('ACTION:SHELL:')) {
-                const shellCmd = actionLine.replace('ACTION:SHELL:', '').trim();
-                addTask('SHELL');
-                logTerminal(`SHELL: ${shellCmd}`);
-                try {
-                    const res = await aegisFetch('/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: `shell:${shellCmd}` }) });
-                    const data = await res.json();
-                    logTerminal(`SHELL -> ${data.success ? 'SUCCESS' : 'FAILED'}${data.output ? ': ' + data.output.trim().slice(0, 200) : ''}`);
-                } catch (e) { logTerminal('SHELL -> ERROR'); }
-                completeTask('SHELL');
-                continue;
-            }
-
-            if (actionLine.startsWith('ACTION:SYSTEM:')) {
-                const parts = actionLine.replace('ACTION:SYSTEM:', '').split(':');
-                const category = parts[0], action = parts[1];
-                const taskName = `${category}:${action}`.toUpperCase();
-                addTask(taskName);
-                const rawParams = actionLine.substring(actionLine.indexOf(action) + action.length + 1);
-                let body = { category, action };
-                if (category === 'file') { const p = rawParams.split('|'); body.path = p[0]; if (action === 'create') body.content = p[1]; if (action === 'move' || action === 'copy') body.destination = p[1]; }
-                else if (category === 'app') body.app_name = rawParams;
-                else if (category === 'browser') body.url = rawParams;
-                else if (category === 'productivity') { try { body.params = JSON.parse(rawParams); } catch (e) {} }
-
-                try {
-                    const res = await aegisFetch('/system', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-                    const data = await res.json();
-                    logTerminal(`${category}:${action} -> ${data.success ? 'SUCCESS' : 'FAILED'}`);
-                    if (category === 'power' && (action === 'shutdown' || action === 'restart')) startPowerCountdown(action);
-                    completeTask(taskName);
-                } catch (e) { logTerminal(`${category}:${action} -> ERROR`); completeTask(taskName); }
-                continue;
-            }
-
-            if (actionLine.startsWith('ACTION:MEDIA:')) {
-                const subAction = actionLine.replace('ACTION:MEDIA:', '').toLowerCase().trim();
-                if (subAction === 'pause') togglePlayback(true);
-                else if (subAction === 'play') togglePlayback(false);
-                else if (subAction.startsWith('volume:')) { const level = parseInt(subAction.split(':')[1]); if (!isNaN(level)) setVolume(level); }
-                continue;
-            }
-
-            if (actionLine.startsWith('ACTION:MEM:')) {
-                const parts = actionLine.replace('ACTION:MEM:', '').split(':');
-                if (parts.length >= 2) {
-                    const profile = JSON.parse(getStoredKey('aegis_user_profile', 'jarvis_user_profile') || '{}');
-                    profile[parts[0].trim()] = parts[1].trim();
-                    localStorage.setItem('aegis_user_profile', JSON.stringify(profile));
-                }
-                continue;
-            }
-
-            verbalResponse.push(line);
-        }
-        return verbalResponse.join('\n').trim();
+    function setVolumeUI(level) {
+        document.getElementById('volume-slider').value = level;
+        document.getElementById('volume-val').textContent = `${level}%`;
     }
+
+    function togglePlaybackUI(playing) {
+        isPlaying = playing;
+        document.getElementById('play-icon').innerHTML = isPlaying ? '<path d="M7 5h3v14H7zM14 5h3v14h-3z"/>' : '<path d="M8 5v14l11-7Z"/>';
+        if (ytPlayer && ytPlayer.getPlayerState) { isPlaying ? ytPlayer.playVideo() : ytPlayer.pauseVideo(); }
+    }
+
+    const toolExecutors = createToolExecutors({
+        postJSON,
+        appUrls: APP_URLS,
+        logTerminal: (text) => logTerminal(text),
+        addTask: (name) => addTask(name),
+        completeTask: (name) => completeTask(name),
+        onMusicSearch,
+        setVolumeUI,
+        togglePlaybackUI,
+        onPowerCountdown: (action) => startPowerCountdown(action),
+        getApiKey: () => getStoredKey('aegis_groq_key', 'jarvis_groq_key') || '',
+        // No vision-capable model is currently enabled on Groq for this account (checked live
+        // against /v1/models) — set this once one is available to enable the take_screenshot
+        // description step; until then the tool still captures the screenshot, it just can't
+        // describe it.
+        visionModel: null,
+    });
 
     /* ---------------- Clock & uptime ---------------- */
     const timeDisplay = document.getElementById('time-display');
@@ -838,22 +673,18 @@ Execute with maximum efficiency.` },
     voiceToggleBtn.addEventListener('click', () => {
         voiceOn = !voiceOn;
         voiceToggleBtn.classList.toggle('is-off', !voiceOn);
-        if (!voiceOn && canSpeak) window.speechSynthesis.cancel();
+        if (!voiceOn) cancelSpeech();
     });
-    function speak(text) {
-        if (!voiceOn || !canSpeak) return;
-        try {
-            window.speechSynthesis.cancel();
-            const u = new SpeechSynthesisUtterance(text);
-            const voices = window.speechSynthesis.getVoices();
-            const aegisVoice = voices.find(v => (v.lang === 'en-GB' && v.name.toLowerCase().includes('male')) || v.name.includes('Google UK English Male') || v.name.includes('Arthur') || v.name.includes('Daniel')) || voices.find(v => v.lang === 'en-GB');
-            if (aegisVoice) u.voice = aegisVoice;
-            u.rate = 1.0; u.pitch = 0.9;
-            u.onstart = () => { presence.speaking = true; renderPresence(); };
-            u.onend = () => { presence.speaking = false; renderPresence(); };
-            u.onerror = () => { presence.speaking = false; renderPresence(); };
-            window.speechSynthesis.speak(u);
-        } catch (e) { /* speech unavailable */ }
+    const AEGIS_VOICE_PREDICATE = (v) => (v.lang === 'en-GB' && v.name.toLowerCase().includes('male')) || v.name.includes('Google UK English Male') || v.name.includes('Arthur') || v.name.includes('Daniel');
+    async function speak(text) {
+        if (!voiceOn) return;
+        const apiKey = getStoredKey('aegis_groq_key', 'jarvis_groq_key') || '';
+        await speakGroqOrBrowser(text, {
+            apiKey,
+            voicePredicate: AEGIS_VOICE_PREDICATE,
+            onStart: () => { presence.speaking = true; renderPresence(); },
+            onEnd: () => { presence.speaking = false; renderPresence(); },
+        });
     }
     if (window.speechSynthesis) {
         window.speechSynthesis.getVoices();
@@ -876,6 +707,24 @@ Execute with maximum efficiency.` },
         return transcript.slice(idx + WAKE_WORD.length).trim().replace(/^[,.\s]+/, '');
     }
 
+    // Recognition transcripts remain the wake-word/turn-end signal and the same-turn fallback
+    // if Whisper is unreachable; the text actually sent to the LLM is Whisper's transcription
+    // of the same utterance, captured in parallel via MediaRecorder (see voice.js).
+    async function finalizeVoiceCommand(fallbackText) {
+        const blob = await stopRecording();
+        let text = fallbackText;
+        const apiKey = getStoredKey('aegis_groq_key', 'jarvis_groq_key') || '';
+        if (apiKey && blob && blob.size > 0) {
+            try {
+                const whisperText = await transcribeWithGroq({ apiKey, blob });
+                if (whisperText) text = whisperText;
+            } catch (e) {
+                console.warn('Whisper transcription failed, using browser transcript:', e.message);
+            }
+        }
+        if (text) { chatInput.value = text; handleSend(text); }
+    }
+
     if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
         recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
         recognition.lang = 'en-US';
@@ -884,25 +733,26 @@ Execute with maximum efficiency.` },
         recognition.onend = () => {
             isListening = false; micBtn.classList.remove('is-listening');
             presence.hearingSpeech = false; presence.pushListening = false; renderPresence();
+            stopRecording().catch(() => {});
             if (alwaysListening) { try { recognition.start(); } catch (e) {} }
         };
         recognition.onresult = (event) => {
             if (!alwaysListening) {
-                const transcript = event.results[0][0].transcript;
-                chatInput.value = transcript;
-                handleSend(transcript);
+                finalizeVoiceCommand(event.results[0][0].transcript);
                 return;
             }
             const result = event.results[event.results.length - 1];
+            if (!presence.hearingSpeech && !result.isFinal) startRecording();
             presence.hearingSpeech = true; renderPresence();
             if (!result.isFinal) return;
             const command = extractCommandAfterWakeWord(result[0].transcript);
             presence.hearingSpeech = false;
-            if (command === null) { renderPresence(); return; }
-            if (command) { chatInput.value = command; handleSend(command); } else renderPresence();
+            if (command === null) { stopRecording().catch(() => {}); renderPresence(); return; }
+            if (command) { finalizeVoiceCommand(command); } else { stopRecording().catch(() => {}); renderPresence(); }
         };
         recognition.onerror = (event) => {
             isListening = false; presence.hearingSpeech = false; presence.pushListening = false; renderPresence();
+            stopRecording().catch(() => {});
             if (alwaysListening && event.error !== 'not-allowed') { try { recognition.start(); } catch (e) {} }
         };
     }
@@ -912,6 +762,7 @@ Execute with maximum efficiency.` },
         if (isListening) { recognition.stop(); return; }
         recognition.continuous = false; recognition.interimResults = false;
         presence.pushListening = true; renderPresence();
+        startRecording();
         recognition.start();
     };
 
@@ -936,7 +787,7 @@ Execute with maximum efficiency.` },
     async function handleSend(val) {
         if (!val) return;
         if (/\b(stop|abort|cancel)\b/.test(val.toLowerCase())) {
-            if (canSpeak) window.speechSynthesis.cancel();
+            cancelSpeech();
             addMessage('Aegis', 'Emergency stop initiated. All pending tasks terminated, Boss.');
             return;
         }
@@ -945,6 +796,18 @@ Execute with maximum efficiency.` },
         chatInput.value = '';
         presence.thinking = true; renderPresence();
         const typingEl = addTyping();
+
+        function finish(text) {
+            typingEl.remove(); entryCount--;
+            presence.thinking = false; renderPresence();
+            if (text) addMessage('Aegis', text);
+        }
+
+        const API_KEY = getStoredKey('aegis_groq_key', 'jarvis_groq_key') || '';
+        if (!API_KEY) {
+            finish('Boss, I need a Groq API key to activate my neural link. Open Settings (top right) and enter one.');
+            return;
+        }
 
         try {
             const conversationHistory = Array.from(chatMessages.children)
@@ -958,15 +821,31 @@ Execute with maximum efficiency.` },
                 })
                 .filter(Boolean);
 
-            const rawResponse = await askAegis(val, conversationHistory);
-            const displayText = await processAegisResponse(rawResponse);
-            typingEl.remove(); entryCount--;
-            presence.thinking = false; renderPresence();
-            if (displayText) addMessage('Aegis', displayText);
+            // Local system context is optional — only available when a bridge is reachable.
+            // Chat itself talks to Groq directly, so it works standalone (e.g. hosted on Vercel, or from your phone).
+            let systemContext = '';
+            try {
+                const sysData = await postJSON('/execute', { command: 'sys_info' });
+                if (sysData.success) systemContext = `LOCAL SYSTEM CONTEXT: ${JSON.stringify(sysData.data)}`;
+            } catch (e) { /* no bridge reachable — chat still works */ }
+
+            let memorySummary = '';
+            try { memorySummary = await getMemorySummary(); } catch (e) { /* memory unavailable — chat still works */ }
+
+            const systemPrompt = buildSystemPrompt({ systemContext, memorySummary });
+
+            const result = await runAgentLoop({
+                apiKey: API_KEY,
+                systemPrompt,
+                history: conversationHistory,
+                userMessage: val,
+                tools: TOOL_SCHEMAS,
+                executeTool: toolExecutors,
+            });
+
+            finish(result.text);
         } catch (err) {
-            typingEl.remove(); entryCount--;
-            presence.thinking = false; renderPresence();
-            addMessage('Aegis', `Neural link error, Boss. Details: ${err.message}`);
+            finish(`Neural link error, Boss. Details: ${err.message}`);
         }
     }
 
@@ -996,8 +875,7 @@ Execute with maximum efficiency.` },
 
     async function callPower(action) {
         try {
-            const res = await aegisFetch('/system', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ category: 'power', action }) });
-            const data = await res.json();
+            const data = await postJSON('/system', { category: 'power', action });
             logTerminal(`power:${action} -> ${data.success ? 'SUCCESS' : 'FAILED'}`);
             return data;
         } catch (e) { logTerminal(`power:${action} -> ERROR (${e.message})`); return { success: false, message: e.message }; }
@@ -1041,14 +919,13 @@ Execute with maximum efficiency.` },
     /* ---------------- Media controls ---------------- */
     let isPlaying = false;
     window.togglePlayback = async (forcePause = null) => {
-        isPlaying = forcePause !== null ? !forcePause : !isPlaying;
-        document.getElementById('play-icon').innerHTML = isPlaying ? '<path d="M7 5h3v14H7zM14 5h3v14h-3z"/>' : '<path d="M8 5v14l11-7Z"/>';
-        if (ytPlayer && ytPlayer.getPlayerState) { isPlaying ? ytPlayer.playVideo() : ytPlayer.pauseVideo(); }
-        try { await aegisFetch('/media', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: isPlaying ? 'play' : 'pause' }) }); } catch (e) {}
+        const playing = forcePause !== null ? !forcePause : !isPlaying;
+        togglePlaybackUI(playing);
+        try { await postJSON('/media', { action: playing ? 'play' : 'pause' }); } catch (e) {}
     };
     window.setVolume = async (level) => {
-        document.getElementById('volume-val').textContent = `${level}%`;
-        try { await aegisFetch('/media', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'set_volume', level: parseInt(level) }) }); } catch (e) {}
+        setVolumeUI(level);
+        try { await postJSON('/media', { action: 'set_volume', level: parseInt(level) }); } catch (e) {}
     };
 
     /* ---------------- Metrics (real) + bridge presence detection ---------------- */
@@ -1057,11 +934,31 @@ Execute with maximum efficiency.` },
     // showing dead gauges and non-functional power buttons.
     document.body.classList.add('no-bridge');
 
+    // Sustained-high-usage nudge: only fires after several consecutive polls stay above
+    // threshold (avoids nudging on a brief spike), and only once per cooldown window.
+    let highCpuStreak = 0;
+    let lastNudgeAt = 0;
+    const CPU_NUDGE_THRESHOLD = 90;
+    const CPU_NUDGE_STREAK_REQUIRED = 3; // ~15s of sustained high usage at a 5s poll interval
+    const CPU_NUDGE_COOLDOWN_MS = 5 * 60 * 1000;
+
+    function checkCpuNudge(cpuPercent) {
+        if (cpuPercent >= CPU_NUDGE_THRESHOLD) {
+            highCpuStreak++;
+        } else {
+            highCpuStreak = 0;
+            return;
+        }
+        if (highCpuStreak >= CPU_NUDGE_STREAK_REQUIRED && Date.now() - lastNudgeAt > CPU_NUDGE_COOLDOWN_MS) {
+            lastNudgeAt = Date.now();
+            addMessage('Aegis', `Heads up, Boss — CPU's been pinned above ${CPU_NUDGE_THRESHOLD}% for a while now.`);
+        }
+    }
+
     async function pollMetrics() {
         const badge = document.getElementById('link-status-badge');
         try {
-            const res = await aegisFetch('/execute', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ command: 'metrics' }) });
-            const data = await res.json();
+            const data = await postJSON('/execute', { command: 'metrics' });
             if (data.success) {
                 const m = data.data;
                 document.getElementById('cpu-ring').style.setProperty('--val', m.cpu_percent.toFixed(0));
@@ -1073,6 +970,7 @@ Execute with maximum efficiency.` },
                 badge.classList.add('is-connected');
                 badge.querySelector('span:last-child').textContent = 'Bridge Online';
                 document.body.classList.remove('no-bridge');
+                checkCpuNudge(m.cpu_percent);
                 return;
             }
         } catch (e) { /* no bridge reachable */ }
@@ -1082,6 +980,19 @@ Execute with maximum efficiency.` },
     }
     pollMetrics();
     setInterval(pollMetrics, 5000);
+
+    /* ---------------- Proactive reminders ---------------- */
+    async function pollReminders() {
+        try {
+            const data = await postJSON('/reminders', { action: 'check' });
+            if (data.success && data.due && data.due.length) {
+                for (const reminder of data.due) {
+                    addMessage('Aegis', `Reminder, Boss: ${reminder.message}`);
+                }
+            }
+        } catch (e) { /* no bridge reachable — no reminders to check */ }
+    }
+    setInterval(pollReminders, 30000);
 
     /* ---------------- Init / settings ---------------- */
     window.initializeSystems = () => {

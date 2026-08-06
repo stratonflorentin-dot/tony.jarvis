@@ -4,7 +4,10 @@
       "PowerShell(Move-Item -Path \"D:\\\\jarvis\\\\src\\\\hooks\\\\useJarvis.js\" -Destination \"D:\\\\jarvis\\\\src\\\\hooks\\\\useAegis.js\")",
       "PowerShell(Move-Item -Path \"D:\\\\jarvis\\\\src\\\\utils\\\\jarvisPersonality.js\" -Destination \"D:\\\\jarvis\\\\src\\\\utils\\\\aegisPersonality.js\")",
       "Skill(run)",
-      "Skill(run:*)"
+      "Skill(run:*)",
+      "Bash(gh repo *)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   }
 }

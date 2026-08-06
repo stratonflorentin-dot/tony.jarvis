@@ -45,13 +45,13 @@ If you *do* want your phone to control your PC remotely, the bridge would need t
 - **Real system control**: file management, app launch/close, browser open, and power control (shutdown/restart/sleep have a genuine, cancellable 10-second OS-level delay; lock is instant) — all via `dev_server.py`.
 - **Wake-word voice**: arm the shield toggle for hands-free "Aegis, …" activation; the mic button is push-to-talk.
 - **Spoken replies**: real browser text-to-speech, toggleable.
-- **Music**: `ACTION:MUSIC:<query>` searches YouTube and plays it embedded, with real volume control.
+- **Music**: the `play_music` tool searches YouTube and plays it embedded, with real volume control.
 - **Live vitals**: CPU, memory, and disk usage polled from the bridge every 5 seconds (local mode only).
 
 ## Technical Details
 
-- **Frontend**: self-contained HTML/CSS/JS, no framework or CDN dependencies at runtime (custom canvas-drawn presence dial, system fonts only).
-- **AI**: browser calls Groq (`llama-3.3-70b-versatile`) directly — works with or without a bridge.
+- **Frontend**: self-contained HTML/CSS/JS, no framework or CDN dependencies at runtime (custom canvas-drawn presence dial, system fonts only). `aegis_standalone.html` (local) and `index.html` (hosted) both import their engine from `src/shared/` — one shared implementation, not two copies.
+- **AI**: browser calls Groq (`llama-3.3-70b-versatile`) directly — works with or without a bridge. Uses native Groq tool/function-calling (`src/shared/groqAgent.js` + `toolSchemas.js`/`toolExecutors.js`) to take real action, not text-parsed commands.
 - **Bridge**: `dev_server.py`, Python stdlib `http.server` + `psutil`/`pycaw`/`comtypes` (Windows). Port `5001` by default.
 - **Security policy**: loopback addresses are rejected everywhere by design — always use a real hostname or LAN IP.
 
